@@ -8,7 +8,7 @@ public class Cinnamon : ModuleRules
 	public Cinnamon(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
+
 		PublicIncludePaths.AddRange(
 			new string[] {
 				Path.Combine(ModuleDirectory, "Public"),

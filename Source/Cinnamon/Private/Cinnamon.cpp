@@ -2,11 +2,16 @@
 
 #include "Cinnamon.h"
 
+DEFINE_LOG_CATEGORY(CinnamonLog);
+
 #define LOCTEXT_NAMESPACE "FCinnamonModule"
 
 void FCinnamonModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+	int a;;
+	a;
+	a;
 }
 
 void FCinnamonModule::ShutdownModule()

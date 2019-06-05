@@ -3,10 +3,10 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "Cinnamon",
-	"Description": "3D Pathfinding",
-	"Category": "AI",
-	"CreatedBy": "Camilo Ruiz Casanova",
-	"CreatedByURL": "camiloruizcasanova.firebaseapp.com",
+	"Description": "",
+	"Category": "Other",
+	"CreatedBy": "",
+	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
 	"SupportURL": "",
@@ -16,7 +16,7 @@
 	"Modules": [
 		{
 			"Name": "Cinnamon",
-			"Type": "Developer",
+			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
 	]
