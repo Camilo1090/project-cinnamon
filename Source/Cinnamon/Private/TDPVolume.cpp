@@ -68,8 +68,8 @@ void ATDPVolume::Initialize()
 	//DrawDebugBox(GetWorld(), mOrigin, mExtents, FQuat::Identity, DebugHelper::LayerColors[mLayers], true);
 
 	mBlockedIndices.Empty();
-	mTree.Layers.Empty();
-	mTree.LeafNodes.Empty();
+	mOctree.Layers.Empty();
+	mOctree.LeafNodes.Empty();
 	mLayerVoxelHalfSizeCache.Reset();
 
 	mTotalLayers = mLayers + 1;
@@ -97,17 +97,23 @@ void ATDPVolume::Generate()
 
 	for (int32 i = 0; i < mTotalLayers; ++i)
 	{
-		mTree.Layers.Emplace();
+		mOctree.Layers.Emplace();
 	}
 
+	// rasterize each layer, from the inner most layer (most precision) to the outer most (less precision), setting parent children links
 	for (int32 i = 0; i < mTotalLayers; ++i)
 	{
 		RasterizeLayer(i);
 	}
 
-	mTotalLayerNodes = mTree.GetTotalLayerNodes();
-	mTotalLeafNodes = mTree.LeafNodes.Num();
-	mTotalBytes = mTree.MemoryUsage();
+	for (int32 i = mTotalLayers - 2; i >= 0; --i)
+	{
+		SetNeighborLinks(i);
+	}
+
+	mTotalLayerNodes = mOctree.GetTotalLayerNodes();
+	mTotalLeafNodes = mOctree.LeafNodes.Num();
+	mTotalBytes = mOctree.MemoryUsage();
 
 #if WITH_EDITOR
 
@@ -153,9 +159,9 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 	{
 		// allocate space for all leaves
 		// we know this value from lowres rasterize
-		mTree.LeafNodes.Reserve(mBlockedIndices[layer].Num() * 8);
+		mOctree.LeafNodes.Reserve(mBlockedIndices[layer].Num() * 8);
 		// likewise for leaf layer nodes
-		mTree.Layers[layer].Reserve(mBlockedIndices[layer].Num() * 8);
+		mOctree.Layers[layer].Reserve(mBlockedIndices[layer].Num() * 8);
 
 		int32 nodes = GetNodeAmountInLayer(layer);
 		for (int32 i = 0; i < nodes; ++i)
@@ -164,14 +170,14 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 			if (mBlockedIndices[layer].Contains(i >> 3))
 			{
 				// Add new node
-				int32 nodeIndex = mTree.GetLayer(layer).Emplace();
-				TDPNode& node = mTree.GetLayer(layer)[nodeIndex];
+				int32 nodeIndex = mOctree.GetLayer(layer).Emplace();
+				TDPNode& node = mOctree.GetLayer(layer)[nodeIndex];
 
 				node.SetMortonCode(i);
 				FVector nodePosition;
 				GetNodePosition(layer, i, nodePosition);
 
-				NodeIndexType currentLeaf = mTree.LeafNodes.Emplace();
+				NodeIndexType currentLeaf = mOctree.LeafNodes.Emplace();
 				if (IsVoxelBlocked(nodePosition, mLayerVoxelHalfSizeCache[layer], true))
 				{
 					FVector origin = nodePosition - FVector(mLayerVoxelHalfSizeCache[layer]);
@@ -183,21 +189,21 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				}
 
 				// Debug
-				if (ShowVoxels)
+				if (DrawVoxels)
 				{
-					DrawDebugBox(GetWorld(), nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), FQuat::Identity, DebugHelper::LayerColors[layer], true);
+					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
 				}
 
-				if (ShowMortonCodes)
+				if (DrawOctreeMortonCodes)
 				{
 					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
 			}
 		}
 	}
-	else if (mTree.GetLayer(layer - 1).Num() > 0)
+	else if (mOctree.GetLayer(layer - 1).Num() > 0)
 	{
-		mTree.Layers[layer].Reserve(mBlockedIndices[layer].Num() * 8);
+		mOctree.Layers[layer].Reserve(mBlockedIndices[layer].Num() * 8);
 
 		int32 nodes = GetNodeAmountInLayer(layer);
 		for (int32 i = 0; i < nodes; ++i)
@@ -205,20 +211,53 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 			if (IsNodeBlocked(layer, i))
 			{
 				// Add new node
-				int32 nodeIndex = mTree.GetLayer(layer).Emplace();
-				TDPNode& node = mTree.GetLayer(layer)[nodeIndex];
+				int32 nodeIndex = mOctree.GetLayer(layer).Emplace();
+				TDPNode& node = mOctree.GetLayer(layer)[nodeIndex];
 
 				node.SetMortonCode(i);
 				FVector nodePosition;
 				GetNodePosition(layer, node.GetMortonCode(), nodePosition);
 
-				// Debug
-				if (ShowVoxels)
+				NodeIndexType firstChildIndex;
+				if (GetNodeIndexInLayer(layer - 1, node.GetMortonCode() << 3, firstChildIndex))
 				{
-					DrawDebugBox(GetWorld(), nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), FQuat::Identity, DebugHelper::LayerColors[layer], true);
+					// set parent -> first child link
+					auto& firstChild = node.GetFirstChild();
+					firstChild.SetLayerIndex(layer - 1);
+					firstChild.SetNodeIndex(firstChildIndex);
+
+					// set children -> parent links (exactly 8 children)
+					auto& octreeLayer = mOctree.GetLayer(layer - 1);
+					for (int32 childOffset = 0; childOffset < 8; ++childOffset)
+					{
+						auto& parent = octreeLayer[firstChildIndex + childOffset].GetParent();
+						parent.SetLayerIndex(layer);
+						parent.SetNodeIndex(nodeIndex);
+					}
+
+					// Debug
+					if (DrawParentChildLinks)
+					{
+						FVector startPosition, endPosition;
+						GetNodePosition(layer, node.GetMortonCode(), startPosition);
+						GetNodePosition(layer - 1, node.GetMortonCode() << 3, endPosition);
+						DrawDebugDirectionalArrow(GetWorld(), startPosition, endPosition, LinkSize, DebugHelper::LayerColors[layer], true);
+					}
+				}
+				else
+				{
+					// if no children then invalidate link
+					auto& firstChild = node.GetFirstChild();
+					firstChild.Invalidate();
 				}
 
-				if (ShowMortonCodes)
+				// Debug
+				if (DrawVoxels)
+				{
+					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
+				}
+
+				if (DrawOctreeMortonCodes)
 				{
 					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
@@ -240,20 +279,143 @@ void ATDPVolume::RasterizeLeafNode(const FVector& origin, NodeIndexType leaf)
 
 		if (IsVoxelBlocked(position, leafSize / 2))
 		{
-			mTree.LeafNodes[leaf].SetSubnode(i);
+			mOctree.LeafNodes[leaf].SetSubnode(i);
 
 			// Debug
-			if (ShowLeafVoxels)
+			if (DrawLeafVoxels)
 			{
-				DrawDebugBox(GetWorld(), position, FVector(leafSize / 2), FQuat::Identity, FColor::Emerald, true);
+				DrawNodeVoxel(position, FVector(leafSize / 2), FColor::Emerald);
 			}
 
-			if (ShowMortonCodes)
+			if (DrawLeafMortonCodes)
 			{
 				DrawDebugString(GetWorld(), position, FString::FromInt(leaf) + ":" + FString::FromInt(i), nullptr, FColor::Emerald);
 			}
 		}
 	}
+}
+
+void ATDPVolume::SetNeighborLinks(const LayerIndexType layer)
+{
+	auto& octreeLayer = mOctree.GetLayer(layer);
+
+	for (int32 i = 0; i < octreeLayer.Num(); ++i)
+	{
+		auto& node = octreeLayer[i];
+		FVector nodePosition;
+		GetNodePosition(layer, node.GetMortonCode(), nodePosition);
+
+		// at most 6 neighbors, each face
+		for (int32 j = 0; j < 6; ++j)
+		{
+			auto& link = node.GetNeighbors()[j];
+
+			NodeIndexType currentNodeIndex = i;
+			auto currentLayer = layer;
+			// find the closest neighbor, start by looking in the current node's layer
+			// go up the layers if no valid neighbor was found in that layer
+			while (!FindNeighborLink(currentLayer, currentNodeIndex, j, link, nodePosition))
+			{
+				auto& parentLink = mOctree.GetLayer(currentLayer)[currentNodeIndex].GetParent();
+				if (parentLink.IsValid())
+				{
+					currentNodeIndex = parentLink.NodeIndex;
+					currentLayer = parentLink.LayerIndex;
+				}
+				else
+				{
+					++currentLayer;
+					GetNodeIndexInLayer(currentLayer, node.GetMortonCode() >> 3, currentNodeIndex);
+				}
+			}
+		}
+	}
+}
+
+bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeIndexType nodeIndex, uint8 direction, TDPNodeLink& link, const FVector& nodePosition)
+{
+	auto& layer = mOctree.GetLayer(layerIndex);
+	auto& node = layer[nodeIndex];
+	int32 maxCoordinate = static_cast<int32>(FMath::Pow(2, (mLayers - layerIndex)));
+
+	uint_fast32_t x, y, z;
+	libmorton::morton3D_64_decode(node.GetMortonCode(), x, y, z);
+
+	FIntVector signedPosition(static_cast<int32>(x), static_cast<int32>(y), static_cast<int32>(z));
+	signedPosition += NodeHelper::NeighborDirections[direction];
+
+	// invalidate link if neighbor coordinates are out of bounds
+	if (signedPosition.X < 0 || signedPosition.X >= maxCoordinate ||
+		signedPosition.Y < 0 || signedPosition.Y >= maxCoordinate ||
+		signedPosition.Z < 0 || signedPosition.Z >= maxCoordinate)
+	{
+		link.Invalidate();
+
+		// Debug
+		if (DrawInvalidNeighborLinks)
+		{
+			FVector startPosition, endPosition;
+			GetNodePosition(layerIndex, node.GetMortonCode(), startPosition);
+			endPosition = startPosition + (FVector(NodeHelper::NeighborDirections[direction]) * mLayerVoxelHalfSizeCache[layerIndex] * 2);
+			DrawDebugDirectionalArrow(GetWorld(), startPosition, endPosition, LinkSize, FColor::Red, true);
+		}
+
+		return true;
+	}
+
+	x = signedPosition.X;
+	y = signedPosition.Y;
+	z = signedPosition.Z;
+
+	MortonCodeType neighborCode = libmorton::morton3D_64_encode(x, y, z);
+
+	// assume we'll look for nodes sequentially after current
+	int32 stopValue = layer.Num();
+	int32 nodeDelta = 1;
+	// if we'll be looking for a lower node then change values
+	if (neighborCode < node.GetMortonCode())
+	{
+		nodeDelta = -1;
+		stopValue = -1;
+	}
+
+	for (int32 i = nodeIndex + nodeDelta; i != stopValue; i += nodeDelta)
+	{
+		auto& currentNode = layer[i];
+
+		// if node found
+		if (currentNode.GetMortonCode() == neighborCode)
+		{
+			if (layerIndex == 0 && 
+				currentNode.HasChildren() && 
+				mOctree.LeafNodes[currentNode.GetFirstChild().NodeIndex].IsFullyBlocked())
+			{
+				link.Invalidate();
+				return true;
+			}
+
+			link.SetLayerIndex(layerIndex);
+			check(i < layer.Num() && i >= 0);
+			link.SetNodeIndex(i);
+
+			// Debug
+			if (DrawValidNeighborLinks)
+			{
+				FVector endPosition;
+				GetNodePosition(layerIndex, neighborCode, endPosition);
+				DrawDebugDirectionalArrow(GetWorld(), nodePosition, endPosition, LinkSize, DebugHelper::LayerColors[layerIndex], true);
+			}
+
+			return true;
+		}
+		else if ((nodeDelta == -1 && currentNode.GetMortonCode() < neighborCode) ||
+			(nodeDelta == 1 && currentNode.GetMortonCode() > neighborCode))
+		{
+			return false;
+		}
+	}
+
+	return false;
 }
 
 bool ATDPVolume::IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const
@@ -290,5 +452,29 @@ int32 ATDPVolume::GetNodeAmountInLayer(LayerIndexType layer) const
 float ATDPVolume::GetVoxelSizeInLayer(LayerIndexType layer) const
 {
 	return mExtents.X / FMath::Pow(2, mLayers) * FMath::Pow(2, layer + 1);
+}
+
+bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const
+{
+	const auto& octreeLayer = mOctree.GetLayer(layer);
+
+	if (nodeCode < octreeLayer[octreeLayer.Num() - 1].GetMortonCode())
+	{
+		for (int32 i = 0; i < octreeLayer.Num(); ++i)
+		{
+			if (octreeLayer[i].GetMortonCode() == nodeCode)
+			{
+				index = i;
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+void ATDPVolume::DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const
+{
+	DrawDebugBox(GetWorld(), position, extent, FQuat::Identity, color, true, -1.0f, 0, VoxelThickness);
 }
 

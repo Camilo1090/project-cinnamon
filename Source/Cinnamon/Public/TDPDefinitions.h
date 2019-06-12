@@ -13,7 +13,8 @@ using MortonCodeType = uint_fast64_t;
 
 class CINNAMON_API NodeHelper final
 {
-
+public:
+	static const FIntVector NeighborDirections[];
 };
 
 class CINNAMON_API DebugHelper final

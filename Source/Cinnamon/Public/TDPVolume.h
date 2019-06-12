@@ -44,13 +44,31 @@ public:
 public:
 	// Debug Info
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
-	bool ShowVoxels = false;
+	bool DrawVoxels = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
-	bool ShowLeafVoxels = false;
+	float VoxelThickness = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
-	bool ShowMortonCodes = false;
+	bool DrawLeafVoxels = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawOctreeMortonCodes = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawLeafMortonCodes = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawParentChildLinks = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawValidNeighborLinks = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawInvalidNeighborLinks = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	float LinkSize = 0.0f;
 
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Layers"))
@@ -77,13 +95,15 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Extents"))
 	FVector mExtents;
 
-	TDPTree mTree;
+	TDPTree mOctree;
 	TArray<TSet<MortonCodeType>> mBlockedIndices;
 
 private:
 	void RasterizeLowRes();
 	void RasterizeLayer(LayerIndexType layer);
 	void RasterizeLeafNode(const FVector& origin, NodeIndexType leaf);
+	void SetNeighborLinks(const LayerIndexType layer);
+	bool FindNeighborLink(const LayerIndexType layerIndex, const NodeIndexType nodeIndex, uint8 direction, TDPNodeLink& link, const FVector& nodePosition);
 
 	bool IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const;
 	bool IsVoxelBlocked(const FVector& position, const float halfSize, bool useTolerance = false) const;
@@ -91,6 +111,9 @@ private:
 	void GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const;
 	int32 GetNodeAmountInLayer(LayerIndexType layer) const;
 	float GetVoxelSizeInLayer(LayerIndexType layer) const;
+	bool GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const;
+
+	void DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const;
 
 	TArray<float> mLayerVoxelHalfSizeCache;
 };

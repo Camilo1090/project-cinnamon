@@ -29,6 +29,8 @@ public:
 
 	TDPNodeLink* GetNeighbors();
 
+	bool HasChildren() const;
+
 private:
 	MortonCodeType mMortonCode;
 	TDPNodeLink mParent;

@@ -52,3 +52,8 @@ TDPNodeLink* TDPNode::GetNeighbors()
 {
 	return mNeighbors;
 }
+
+bool TDPNode::HasChildren() const
+{
+	return mFirstChild.IsValid();
+}
