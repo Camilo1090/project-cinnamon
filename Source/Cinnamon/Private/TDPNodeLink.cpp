@@ -10,6 +10,21 @@ TDPNodeLink::TDPNodeLink(LayerIndexType layer, NodeIndexType node, SubnodeIndexT
 {
 }
 
+bool TDPNodeLink::operator==(const TDPNodeLink& other) const
+{
+	return memcmp(this, &other, sizeof(TDPNodeLink)) == 0;
+}
+
+bool TDPNodeLink::operator!=(const TDPNodeLink& other) const
+{
+	return !(*this == other);
+}
+
+bool TDPNodeLink::operator<(const TDPNodeLink& other) const
+{
+	return *reinterpret_cast<const uint32*>(this) < *reinterpret_cast<const uint32*>(&other);
+}
+
 void TDPNodeLink::SetLayerIndex(LayerIndexType layer)
 {
 	LayerIndex = layer;

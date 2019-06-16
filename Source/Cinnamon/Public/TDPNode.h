@@ -28,6 +28,7 @@ public:
 	void SetFirstChild(TDPNodeLink node);
 
 	TDPNodeLink* GetNeighbors();
+	const TDPNodeLink* GetNeighbors() const;
 
 	bool HasChildren() const;
 

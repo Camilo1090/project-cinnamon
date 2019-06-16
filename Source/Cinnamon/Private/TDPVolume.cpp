@@ -6,6 +6,7 @@
 #include "Components/BrushComponent.h"
 #include "Components/LineBatchComponent.h"
 #include "TDPNodeLink.h"
+#include "TDPNode.h"
 #include "libmorton/include/morton.h"
 #include "DrawDebugHelpers.h"
 #include <chrono>
@@ -277,7 +278,7 @@ void ATDPVolume::RasterizeLeafNode(const FVector& origin, NodeIndexType leaf)
 		libmorton::morton3D_64_decode(i, x, y, z);
 		FVector position = origin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
 
-		if (IsVoxelBlocked(position, leafSize / 2))
+		if (IsVoxelBlocked(position, leafSize / 2, true))
 		{
 			mOctree.LeafNodes[leaf].SetSubnode(i);
 
@@ -423,17 +424,21 @@ bool ATDPVolume::IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const
 	return layer == mBlockedIndices.Num() || mBlockedIndices[layer].Contains(code >> 3);
 }
 
-bool ATDPVolume::IsVoxelBlocked(const FVector& position, const float halfSize, bool useTolerance) const
+bool ATDPVolume::IsVoxelBlocked(const FVector& position, const float halfSize, bool useClearance) const
 {
 	FCollisionQueryParams collisionParams;
 	collisionParams.bFindInitialOverlaps = true;
-	collisionParams.bTraceComplex = false;
+	collisionParams.bTraceComplex = mComplexCollision;
 
-	// TODO: make tolerance member variable
-	float tolerance = useTolerance ? 1.0f : 0.0f;
+	float clearance = useClearance ? mCollisionClearance : 0.0f;
 
-	//DrawDebugBox(GetWorld(), position, FVector(halfSize + tolerance), FQuat::Identity, FColor::Black, true);
-	return GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + tolerance)), collisionParams);
+	//DrawDebugBox(GetWorld(), position, FVector(halfSize + clearance), FQuat::Identity, FColor::Black, true);
+	return GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + clearance)), collisionParams);
+}
+
+const TDPTree& ATDPVolume::GetOctree() const
+{
+	return mOctree;
 }
 
 void ATDPVolume::GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const
@@ -452,6 +457,328 @@ int32 ATDPVolume::GetNodeAmountInLayer(LayerIndexType layer) const
 float ATDPVolume::GetVoxelSizeInLayer(LayerIndexType layer) const
 {
 	return mExtents.X / FMath::Pow(2, mLayers) * FMath::Pow(2, layer + 1);
+}
+
+bool ATDPVolume::GetNodePositionFromLink(TDPNodeLink link, FVector& position) const
+{
+	const auto& node = mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
+	GetNodePosition(link.LayerIndex, node.GetMortonCode(), position);
+
+	// if layer 0 and valid children, check 64 bit leaf for any set bits
+	if (link.LayerIndex == 0 && node.GetFirstChild().IsValid())
+	{
+		float voxelSize = mLayerVoxelHalfSizeCache[0] * 2;
+		uint_fast32_t x, y, z;
+		libmorton::morton3D_64_decode(link.SubnodeIndex, x, y, z);
+		position += FVector(x * voxelSize / 4, y * voxelSize / 4, z * voxelSize / 4) - FVector(voxelSize * 0.375f);
+		const auto& leafNode = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
+
+		return !leafNode.GetSubnode(link.SubnodeIndex);
+	}
+
+	return true;
+}
+
+bool ATDPVolume::GetLinkFromPosition(const FVector& position, TDPNodeLink& link) const
+{
+	if (!IsPointInside(position))
+	{
+		return false;
+	}
+
+	FVector mortonOrigin = mOrigin - mExtents;
+	FVector localPosition = position - mortonOrigin;
+
+	LayerIndexType currentLayer = mTotalLayers - 1;
+	NodeIndexType currentNode = 0;
+
+	while (currentLayer >= 0)
+	{
+		const auto& layer = mOctree.GetLayer(currentLayer);
+
+		FIntVector voxel;
+		GetVoxelMortonPosition(position, currentLayer, voxel);
+
+		MortonCodeType code = libmorton::morton3D_64_encode(static_cast<uint_fast32_t>(voxel.X), static_cast<uint_fast32_t>(voxel.Y), static_cast<uint_fast32_t>(voxel.Z));
+
+		for (NodeIndexType i = currentNode; i < layer.Num(); ++i)
+		{
+			const auto& node = layer[i];
+			if (node.GetMortonCode() == code)
+			{
+				// if node found and it has no children then this is our most precise node for the given position
+				if (!node.GetFirstChild().IsValid())
+				{
+					link.SetLayerIndex(currentLayer);
+					link.SetNodeIndex(i);
+					link.SetSubnodeIndex(0);
+
+					return true;
+				}
+
+				// if we are in layer 0 then we have to find the subnode inside the leaf node that contains the given position
+				if (currentLayer == 0)
+				{
+					const auto& leaf = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
+					float voxelHalfSize = mLayerVoxelHalfSizeCache[currentLayer];
+
+					FVector nodePosition;
+					GetNodePosition(currentLayer, node.GetMortonCode(), nodePosition);
+					FVector nodeOrigin = nodePosition - FVector(voxelHalfSize);
+					FVector nodeLocalPosition = position - nodeOrigin;
+
+					FIntVector mortonPosition;
+					mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / voxelHalfSize / 2);
+					mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / voxelHalfSize / 2);
+					mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / voxelHalfSize / 2);
+
+					link.SetLayerIndex(currentLayer);
+					link.SetNodeIndex(i);
+
+					MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+
+					if (leaf.GetSubnode(leafIndex))
+					{
+						return false;
+					}
+
+					link.SetSubnodeIndex(static_cast<SubnodeIndexType>(leafIndex));
+
+					return true;
+				}
+
+				// if no leaf node then we keep going down the octree to the next layer and 
+				currentLayer = node.GetFirstChild().LayerIndex;
+				currentNode = node.GetFirstChild().NodeIndex;
+
+				break;
+			}
+		}
+	}
+
+	return false;
+}
+
+void ATDPVolume::GetVoxelMortonPosition(const FVector & position, const LayerIndexType layer, FIntVector& mortonPosition) const
+{
+	FVector mortonOrigin = mOrigin - mExtents;
+	FVector localPosition = position - mortonOrigin;
+
+	float voxelSize = mLayerVoxelHalfSizeCache[layer] * 2;
+
+	mortonPosition.X = FMath::FloorToInt((localPosition.X / voxelSize));
+	mortonPosition.Y = FMath::FloorToInt((localPosition.Y / voxelSize));
+	mortonPosition.Z = FMath::FloorToInt((localPosition.Z / voxelSize));
+}
+
+int32 ATDPVolume::GetTotalLayers() const
+{
+	return mTotalLayers;
+}
+
+const TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link) const
+{
+	if (link.IsValid())
+	{
+		return &mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
+	}
+
+	return nullptr;
+}
+
+void ATDPVolume::GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const
+{
+	const auto node = GetNodeFromLink(link);
+
+	if (node)
+	{
+		// check the six neighbor links
+		for (int32 i = 0; i < 6; ++i)
+		{
+			const auto& neighborLink = node->GetNeighbors()[i];
+
+			// nothing to do if link is invalid
+			if (!neighborLink.IsValid())
+			{
+				continue;
+			}
+
+			const auto neighbor = GetNodeFromLink(neighborLink);
+
+			if (neighbor)
+			{
+				// if neighbor has no children then just add it and continue
+				if (!neighbor->HasChildren())
+				{
+					neighbors.Add(neighborLink);
+					continue;
+				}
+
+				// if there are children then they need to be evaluated until highest precision is reached
+				TArray<TDPNodeLink> remainingLinks;
+				remainingLinks.Add(neighborLink);
+
+				while (remainingLinks.Num())
+				{
+					auto currentLink = remainingLinks.Pop();
+					const auto currentNode = GetNodeFromLink(currentLink);
+
+					if (currentNode)
+					{
+						// highest precision reached with this child
+						if (!currentNode->HasChildren())
+						{
+							neighbors.Add(currentLink);
+							continue;
+						}
+
+						// non leaf nodes will have 8 children and 4 will be neighbors for each face
+						if (currentLink.LayerIndex > 0)
+						{
+							for (const auto& childIndex : NodeHelper::ChildOffsets[i])
+							{
+								auto childLink = currentNode->GetFirstChild();
+								childLink.NodeIndex += childIndex;
+								const auto& childNode = GetNodeFromLink(childLink);
+
+								// more work to do if there are more children
+								if (childNode->HasChildren())
+								{
+									remainingLinks.Add(childLink);
+								}
+								// no children, highest precision this route
+								else
+								{
+									neighbors.Add(childLink);
+								}
+							}
+						}
+						// leaf nodes have 64 children and 16 will be facing the given node
+						else
+						{
+							for (const auto& leafIndex : NodeHelper::LeafChildOffsets[i])
+							{
+								auto leafLink = neighbor->GetFirstChild();
+								const auto& leafNode = mOctree.LeafNodes[leafLink.NodeIndex];
+								leafLink.SetSubnodeIndex(leafIndex);
+
+								// only add them if they are not blocked
+								if (!leafNode.GetSubnode(leafIndex))
+								{
+									neighbors.Add(leafLink);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+void ATDPVolume::GetLeafNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const
+{
+	MortonCodeType leafIndex = link.SubnodeIndex;
+	const auto node = GetNodeFromLink(link);
+
+	if (node)
+	{
+		const auto& leaf = mOctree.LeafNodes[node->GetFirstChild().NodeIndex];
+
+		uint_fast32_t x = 0, y = 0, z = 0;
+		libmorton::morton3D_64_decode(leafIndex, x, y, z);
+
+		for (int32 i = 0; i < 6; ++i)
+		{
+			FIntVector mortonPosition{ static_cast<int32>(x), static_cast<int32>(y), static_cast<int32>(z) };
+			mortonPosition += NodeHelper::NeighborDirections[i];
+
+			if (mortonPosition.X >= 0 && mortonPosition.X < 4 &&
+				mortonPosition.Y >= 0 && mortonPosition.Y < 4 &&
+				mortonPosition.Z >= 0 && mortonPosition.Z < 4)
+			{
+				MortonCodeType neighborIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+
+				if (leaf.GetSubnode(neighborIndex))
+				{
+					continue;
+				}
+				else
+				{
+					neighbors.Emplace(0, link.NodeIndex, neighborIndex);
+					continue;
+				}
+			}
+			else
+			{
+				const auto& neighborLink = node->GetNeighbors()[i];
+				const auto neighborNode = GetNodeFromLink(neighborLink);
+
+				if (neighborNode)
+				{
+					if (!neighborNode->GetFirstChild().IsValid())
+					{
+						neighbors.Add(neighborLink);
+						continue;
+					}
+
+					const auto& leafNode = mOctree.LeafNodes[neighborNode->GetFirstChild().NodeIndex];
+
+					if (leafNode.IsFullyBlocked())
+					{
+						continue;
+					}
+					else
+					{
+						if (mortonPosition.X < 0)
+						{
+							mortonPosition.X = 3;
+						}
+						else if (mortonPosition.X > 3)
+						{
+							mortonPosition.X = 0;
+						}
+						else if (mortonPosition.Y < 0)
+						{
+							mortonPosition.Y = 3;
+						}
+						else if (mortonPosition.Y > 3)
+						{
+							mortonPosition.Y = 0;
+						}
+						if (mortonPosition.Z < 0)
+						{
+							mortonPosition.Z = 3;
+						}
+						else if (mortonPosition.Z > 3)
+						{
+							mortonPosition.Z = 0;
+						}
+
+						MortonCodeType subnodeIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+
+						if (!leafNode.GetSubnode(subnodeIndex))
+						{
+							neighbors.Emplace(0, neighborNode->GetFirstChild().NodeIndex, subnodeIndex);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+bool ATDPVolume::IsPointInside(const FVector& point) const
+{
+	return GetComponentsBoundingBox(true).IsInside(point);
+}
+
+void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link) const
+{
+	FVector position;
+	GetNodePosition(link.LayerIndex, link.NodeIndex, position);
+
+
 }
 
 bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const

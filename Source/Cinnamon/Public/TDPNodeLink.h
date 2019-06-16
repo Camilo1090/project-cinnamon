@@ -17,6 +17,9 @@ struct CINNAMON_API TDPNodeLink
 	static const TDPNodeLink InvalidLink;
 
 	explicit TDPNodeLink(LayerIndexType layer = INVALID_LAYER_INDEX, NodeIndexType node = 0, SubnodeIndexType subnode = 0);
+	bool operator==(const TDPNodeLink& other) const;
+	bool operator!=(const TDPNodeLink& other) const;
+	bool operator<(const TDPNodeLink& other) const;
 
 	void SetLayerIndex(LayerIndexType layer);
 	void SetNodeIndex(NodeIndexType node);
@@ -26,3 +29,8 @@ struct CINNAMON_API TDPNodeLink
 	bool IsValid() const;
 	FString ToString() const;
 };
+
+FORCEINLINE uint32 GetTypeHash(const TDPNodeLink& link)
+{
+	return *reinterpret_cast<const uint32*>(&link);
+}

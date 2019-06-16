@@ -70,12 +70,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	float LinkSize = 0.0f;
 
+public:
+	const TDPTree& GetOctree() const;
+	float GetVoxelSizeInLayer(LayerIndexType layer) const;
+	bool GetNodePositionFromLink(TDPNodeLink link, FVector& position) const;
+	bool GetLinkFromPosition(const FVector& position, TDPNodeLink& link) const;
+	void GetVoxelMortonPosition(const FVector& position, const LayerIndexType layer, FIntVector& mortonPosition) const;
+	int32 GetTotalLayers() const;
+	const TDPNode* GetNodeFromLink(const TDPNodeLink& link) const;
+	void GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
+	void GetLeafNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
+	bool IsPointInside(const FVector& point) const;
+
+	void DrawVoxelFromLink(const TDPNodeLink& link) const;
+
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Layers"))
 	int32 mLayers = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Collision Channel"))
 	TEnumAsByte<ECollisionChannel> mCollisionChannel = ECollisionChannel::ECC_Pawn;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Collision Clearance"))
+	float mCollisionClearance = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Complex Collision"))
+	bool mComplexCollision = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Total Layers"))
 	int32 mTotalLayers = 0;
@@ -106,12 +126,11 @@ private:
 	bool FindNeighborLink(const LayerIndexType layerIndex, const NodeIndexType nodeIndex, uint8 direction, TDPNodeLink& link, const FVector& nodePosition);
 
 	bool IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const;
-	bool IsVoxelBlocked(const FVector& position, const float halfSize, bool useTolerance = false) const;
+	bool IsVoxelBlocked(const FVector& position, const float halfSize, bool useClearance = false) const;
 
-	void GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const;
 	int32 GetNodeAmountInLayer(LayerIndexType layer) const;
-	float GetVoxelSizeInLayer(LayerIndexType layer) const;
 	bool GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const;
+	void GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const;
 
 	void DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const;
 
