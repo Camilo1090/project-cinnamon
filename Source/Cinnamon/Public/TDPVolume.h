@@ -43,6 +43,8 @@ public:
 
 public:
 	// Debug Info
+
+#if WITH_EDITOR
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	bool DrawVoxels = false;
 
@@ -69,6 +71,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	float LinkSize = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawCollisionVoxels = false;
+#endif
 
 public:
 	const TDPTree& GetOctree() const;

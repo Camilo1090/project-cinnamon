@@ -33,7 +33,7 @@ struct CINNAMON_API FTDPPathFinderSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Heuristics")
 	float UnitCost = 1.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Heuristics")
-	float EstimateWeight = 1.0f;
+	float HeuristicWeight = 1.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Heuristics")
 	float NodeSizeCompensation = 1.0f;
 

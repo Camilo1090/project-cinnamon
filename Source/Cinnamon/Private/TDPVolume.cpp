@@ -63,7 +63,10 @@ bool ATDPVolume::ShouldTickIfViewportsOnly() const
 
 void ATDPVolume::Initialize()
 {
+#if WITH_EDITOR
 	UE_LOG(CinnamonLog, Log, TEXT("Initalizing..."));
+#endif
+
 	FBox bounds = GetComponentsBoundingBox(true);
 	bounds.GetCenterAndExtents(mOrigin, mExtents);
 	//DrawDebugBox(GetWorld(), mOrigin, mExtents, FQuat::Identity, DebugHelper::LayerColors[mLayers], true);
@@ -92,7 +95,6 @@ void ATDPVolume::Generate()
 	auto startTime = std::chrono::high_resolution_clock::now();
 
 #endif // WITH_EDITOR
-
 
 	RasterizeLowRes();
 
@@ -140,7 +142,7 @@ void ATDPVolume::RasterizeLowRes()
 
 		if (IsVoxelBlocked(position, mLayerVoxelHalfSizeCache[lowresLayer]))
 		{
-			mBlockedIndices[lowresLayer - 1].Add(i);
+			mBlockedIndices[0].Add(i);
 		}
 	}
 
@@ -189,6 +191,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 					child.SetSubnodeIndex(0);
 				}
 
+#if WITH_EDITOR
 				// Debug
 				if (DrawVoxels)
 				{
@@ -199,6 +202,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				{
 					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
+#endif
 			}
 		}
 	}
@@ -236,6 +240,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 						parent.SetNodeIndex(nodeIndex);
 					}
 
+#if WITH_EDITOR
 					// Debug
 					if (DrawParentChildLinks)
 					{
@@ -244,6 +249,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 						GetNodePosition(layer - 1, node.GetMortonCode() << 3, endPosition);
 						DrawDebugDirectionalArrow(GetWorld(), startPosition, endPosition, LinkSize, DebugHelper::LayerColors[layer], true);
 					}
+#endif
 				}
 				else
 				{
@@ -252,6 +258,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 					firstChild.Invalidate();
 				}
 
+#if WITH_EDITOR
 				// Debug
 				if (DrawVoxels)
 				{
@@ -262,6 +269,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				{
 					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
+#endif
 			}
 		}
 	}
@@ -282,6 +290,7 @@ void ATDPVolume::RasterizeLeafNode(const FVector& origin, NodeIndexType leaf)
 		{
 			mOctree.LeafNodes[leaf].SetSubnode(i);
 
+#if WITH_EDITOR
 			// Debug
 			if (DrawLeafVoxels)
 			{
@@ -292,6 +301,7 @@ void ATDPVolume::RasterizeLeafNode(const FVector& origin, NodeIndexType leaf)
 			{
 				DrawDebugString(GetWorld(), position, FString::FromInt(leaf) + ":" + FString::FromInt(i), nullptr, FColor::Emerald);
 			}
+#endif
 		}
 	}
 }
@@ -352,6 +362,7 @@ bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeInd
 	{
 		link.Invalidate();
 
+#if WITH_EDITOR
 		// Debug
 		if (DrawInvalidNeighborLinks)
 		{
@@ -360,6 +371,7 @@ bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeInd
 			endPosition = startPosition + (FVector(NodeHelper::NeighborDirections[direction]) * mLayerVoxelHalfSizeCache[layerIndex] * 2);
 			DrawDebugDirectionalArrow(GetWorld(), startPosition, endPosition, LinkSize, FColor::Red, true);
 		}
+#endif
 
 		return true;
 	}
@@ -399,6 +411,7 @@ bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeInd
 			check(i < layer.Num() && i >= 0);
 			link.SetNodeIndex(i);
 
+#if WITH_EDITOR
 			// Debug
 			if (DrawValidNeighborLinks)
 			{
@@ -406,6 +419,7 @@ bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeInd
 				GetNodePosition(layerIndex, neighborCode, endPosition);
 				DrawDebugDirectionalArrow(GetWorld(), nodePosition, endPosition, LinkSize, DebugHelper::LayerColors[layerIndex], true);
 			}
+#endif
 
 			return true;
 		}
@@ -431,9 +445,16 @@ bool ATDPVolume::IsVoxelBlocked(const FVector& position, const float halfSize, b
 	collisionParams.bTraceComplex = mComplexCollision;
 
 	float clearance = useClearance ? mCollisionClearance : 0.0f;
+	bool result = GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + clearance)), collisionParams);
 
-	//DrawDebugBox(GetWorld(), position, FVector(halfSize + clearance), FQuat::Identity, FColor::Black, true);
-	return GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + clearance)), collisionParams);
+#if WITH_EDITOR
+	if (DrawCollisionVoxels && result)
+	{
+		DrawDebugBox(GetWorld(), position, FVector(halfSize + clearance), FQuat::Identity, FColor::Black, true);
+	}
+#endif
+
+	return result;
 }
 
 const TDPTree& ATDPVolume::GetOctree() const
@@ -618,7 +639,7 @@ void ATDPVolume::GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNod
 				TArray<TDPNodeLink> remainingLinks;
 				remainingLinks.Add(neighborLink);
 
-				while (remainingLinks.Num())
+				while (remainingLinks.Num() > 0)
 				{
 					auto currentLink = remainingLinks.Pop();
 					const auto currentNode = GetNodeFromLink(currentLink);
@@ -639,17 +660,20 @@ void ATDPVolume::GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNod
 							{
 								auto childLink = currentNode->GetFirstChild();
 								childLink.NodeIndex += childIndex;
-								const auto& childNode = GetNodeFromLink(childLink);
+								const auto childNode = GetNodeFromLink(childLink);
 
-								// more work to do if there are more children
-								if (childNode->HasChildren())
+								if (childNode)
 								{
-									remainingLinks.Add(childLink);
-								}
-								// no children, highest precision this route
-								else
-								{
-									neighbors.Add(childLink);
+									// more work to do if there are more children
+									if (childNode->HasChildren())
+									{
+										remainingLinks.Emplace(childLink);
+									}
+									// no children, highest precision this route
+									else
+									{
+										neighbors.Emplace(childLink);
+									}
 								}
 							}
 						}
@@ -665,7 +689,7 @@ void ATDPVolume::GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNod
 								// only add them if they are not blocked
 								if (!leafNode.GetSubnode(leafIndex))
 								{
-									neighbors.Add(leafLink);
+									neighbors.Emplace(leafLink);
 								}
 							}
 						}
@@ -778,7 +802,7 @@ void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link) const
 	FVector position;
 	GetNodePosition(link.LayerIndex, link.NodeIndex, position);
 
-
+	//TODO
 }
 
 bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const

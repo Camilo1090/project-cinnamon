@@ -30,7 +30,7 @@ void TDPAStar::FindPath(const TDPNodeLink startLink, const TDPNodeLink endLink, 
 		return (gScores[left] + hScores[left]) < (gScores[right] + hScores[right]);
 	};
 
-	int32 iterations = 0;
+	uint32 iterations = 0;
 
 	do
 	{
@@ -95,25 +95,25 @@ void TDPAStar::FindPath(const TDPNodeLink startLink, const TDPNodeLink endLink, 
 		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, iterations: %i"), iterations);
 		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, visited nodes: %i"), closedSet.Num());
 		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, frontier: %i"), openSet.Num());
-		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, path length : %i"), path.GetPath().Num());
+		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, path length: %i"), path.GetPath().Num());
+		UE_LOG(CinnamonLog, Display, TEXT("Pathfinding complete, path cost: %f"), gScores[endLink]);
 #endif
 		return;
 	}
 
 #if WITH_EDITOR
-	UE_LOG(CinnamonLog, Display, TEXT("Pathfinding failed, iterations : %i"), iterations);
+	UE_LOG(CinnamonLog, Warning, TEXT("Pathfinding failed, iterations: %i"), iterations);
+	UE_LOG(CinnamonLog, Warning, TEXT("Pathfinding failed, visited nodes: %i"), closedSet.Num());
+	UE_LOG(CinnamonLog, Warning, TEXT("Pathfinding failed, frontier: %i"), openSet.Num());
 #endif
 }
 
 float TDPAStar::GetCost(const TDPNodeLink& start, const TDPNodeLink& end) const
 {
-	float cost = 0.0f;
+	// assume unit cost
+	float cost = mSettings->UnitCost;
 
-	if (mSettings->UseUnitCost)
-	{
-		cost = mSettings->UnitCost;
-	}
-	else
+	if (!mSettings->UseUnitCost)
 	{
 		FVector startPosition, endPosition;
 		mVolume->GetNodePositionFromLink(start, startPosition);
@@ -121,15 +121,16 @@ float TDPAStar::GetCost(const TDPNodeLink& start, const TDPNodeLink& end) const
 		cost = (startPosition - endPosition).Size();
 	}
 
-	cost *= 1.0f - (static_cast<float>(end.LayerIndex) / static_cast<float>(mVolume->GetTotalLayers())) * mSettings->NodeSizeCompensation;
+	cost *= (1.0f - (static_cast<float>(end.LayerIndex) / static_cast<float>(mVolume->GetTotalLayers()))) * mSettings->NodeSizeCompensation;
 
 	return cost;
 }
 
 float TDPAStar::CalculateHeuristic(const TDPNodeLink& start, const TDPNodeLink& end) const
 {
-	float heuristic = mHeuristic(start, end, *mVolume) * mSettings->EstimateWeight;
-	heuristic *= 1.0f - (static_cast<float>(end.LayerIndex) / static_cast<float>(mVolume->GetTotalLayers())) * mSettings->NodeSizeCompensation;
+	float heuristic = mHeuristic(start, end, *mVolume);
+	heuristic *= (1.0f - (static_cast<float>(end.LayerIndex) / static_cast<float>(mVolume->GetTotalLayers()))) * mSettings->NodeSizeCompensation;
+	heuristic *= mSettings->HeuristicWeight;
 
 	return heuristic;
 }
