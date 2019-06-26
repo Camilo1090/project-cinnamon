@@ -5,7 +5,10 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
+#if WITH_EDITOR
 DECLARE_LOG_CATEGORY_EXTERN(CinnamonLog, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(VisualCinnamonLog, Log, All);
+#endif
 
 class FCinnamonModule : public IModuleInterface
 {

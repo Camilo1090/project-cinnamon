@@ -4,9 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Runtime/Core/Public/Async/AsyncWork.h"
+#include "FindPathTask.h"
 #include "TDPNavigationPath.h"
 #include "PathHelper.h"
 #include "IPathFinder.h"
+#include "ThreadSafeBool.h"
 #include "TDPNavigationComponent.generated.h"
 
 class ATDPVolume;
@@ -36,8 +39,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Path Finder")
 	FTDPPathFinderSettings PathFinderSettings;
 
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Smoothing")
-	//int SmoothingIterations = 0;
+	UFUNCTION(BlueprintCallable)
+	bool CanNavigate() const;
+
+	UFUNCTION(BlueprintCallable)
+	bool CanNavigateToPosition(const FVector& position) const;
 
 protected:
 	// Called when the game starts
@@ -48,7 +54,7 @@ protected:
 	bool FindNavigationVolume();
 
 protected:
-	TDPNavigationPath mNavigationPath;
+	TSharedPtr<TDPNavigationPath> mNavigationPath = nullptr;
 	const ATDPVolume* mNavigationVolume = nullptr;
 	TSharedPtr<IPathFinder> mPathFinder = nullptr;
 
@@ -60,4 +66,12 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	bool FindPath(const FVector& targetPosition);
+
+	bool FindPathAsync(const FVector& targetPosition, FThreadSafeBool& complete);
+
+	TSharedPtr<TDPNavigationPath> GetPath();
+	const ATDPVolume* GetVolume() const;
+
+private:
+	TSharedPtr<FAsyncTask<FindPathTask>> mCurrentAsyncTask = nullptr;
 };

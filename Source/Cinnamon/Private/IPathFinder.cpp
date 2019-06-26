@@ -10,31 +10,45 @@ IPathFinder::IPathFinder(const ATDPVolume& volume, const PathHelper::Heuristic& 
 
 void IPathFinder::BuildPath(const TMap<TDPNodeLink, TDPNodeLink>& trail, TDPNodeLink currentLink, const FVector& startPosition, const FVector& endPosition, TDPNavigationPath& path) const
 {
-	auto& points = path.GetPath();
+	// build path from end to start
+	TArray<TDPPathPoint> points;
+
+	FVector position;
+	mVolume->GetNodePositionFromLink(currentLink, position);
+	points.Emplace(position, static_cast<LayerIndexType>(currentLink.LayerIndex), false);
+
 	while (const TDPNodeLink* link = trail.Find(currentLink))
 	{
-		FVector position;
-		mVolume->GetNodePositionFromLink(currentLink, position);
+		mVolume->GetNodePositionFromLink(*link, position);
 
-		if (currentLink.LayerIndex == 0)
+		if (link->LayerIndex == 0)
 		{
-			const auto& node = mVolume->GetNodeFromLink(currentLink);
+			const auto& node = mVolume->GetNodeFromLink(*link);
 			if (!node->HasChildren())
 			{
-				points.Emplace(position, static_cast<LayerIndexType>(currentLink.LayerIndex), false);
+				points.Emplace(position, static_cast<LayerIndexType>(link->LayerIndex), false);
 			}
 			else
 			{
-				points.Emplace(position, static_cast<LayerIndexType>(currentLink.LayerIndex), true);
+				points.Emplace(position, static_cast<LayerIndexType>(link->LayerIndex), true);
 			}
 		}
 		else
 		{
-			points.Emplace(position, static_cast<LayerIndexType>(currentLink.LayerIndex), false);
+			points.Emplace(position, static_cast<LayerIndexType>(link->LayerIndex), false);
 		}
 
 		currentLink = *link;
 	}
 
-	points.Emplace(startPosition, static_cast<LayerIndexType>(currentLink.LayerIndex), false);
+	// redundant but clearer
+	//points.Emplace(startPosition, static_cast<LayerIndexType>(currentLink.LayerIndex), false);
+
+	// build real path from start to end
+	auto& outPoints = path.GetPath();
+	outPoints.Reserve(points.Num());
+	for (int32 i = points.Num() - 1; i >= 0; --i)
+	{
+		outPoints.Emplace(points[i]);
+	}
 }

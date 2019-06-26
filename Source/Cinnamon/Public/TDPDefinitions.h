@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AITypes.h"
 
 using LayerIndexType = uint8;
 using NodeIndexType = int32;
@@ -23,4 +24,26 @@ class CINNAMON_API DebugHelper final
 {
 public:
 	static const FColor LayerColors[];
+};
+
+UENUM(BlueprintType)
+namespace ETDPPathfindingRequestResult
+{
+	enum Type
+	{
+		Failed, // Something went wrong
+		ReadyToPath, // Pre-reqs satisfied
+		AlreadyAtGoal, // No need to move
+		Deferred, // Passed request to another thread, need to wait
+		Success // it worked!
+	};
+}
+
+struct CINNAMON_API FTDPPathfindingRequestResult
+{
+	FAIRequestID MoveId;
+	TEnumAsByte<ETDPPathfindingRequestResult::Type> Code;
+
+	FTDPPathfindingRequestResult() : MoveId(FAIRequestID::InvalidRequest), Code(ETDPPathfindingRequestResult::Failed) {}
+	operator ETDPPathfindingRequestResult::Type() const { return Code; }
 };

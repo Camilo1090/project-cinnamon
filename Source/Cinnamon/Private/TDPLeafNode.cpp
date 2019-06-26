@@ -16,7 +16,7 @@ void TDPLeafNode::ClearSubnode(SubnodeIndexType subnode)
 
 bool TDPLeafNode::GetSubnode(MortonCodeType code) const
 {
-	return mSubnodes & (1ULL << code);
+	return (mSubnodes & (1ULL << code)) != 0;
 }
 
 bool TDPLeafNode::IsFullyBlocked() const

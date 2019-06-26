@@ -16,10 +16,23 @@ UTDPNavigationComponent::UTDPNavigationComponent()
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
 }
 
+bool UTDPNavigationComponent::CanNavigate() const
+{
+	FVector pawnPosition;
+	TDPNodeLink link;
+
+	return HasValidNavigationVolume() && GetPawnPosition(pawnPosition) && mNavigationVolume->IsPointInside(pawnPosition) && 
+		mNavigationVolume->GetTotalLayers() && mNavigationVolume->GetLinkFromPosition(pawnPosition, link);
+}
+
+bool UTDPNavigationComponent::CanNavigateToPosition(const FVector & position) const
+{
+	TDPNodeLink link;
+
+	return mNavigationVolume->GetLinkFromPosition(position, link) && CanNavigate();
+}
 
 // Called when the game starts
 void UTDPNavigationComponent::BeginPlay()
@@ -28,6 +41,8 @@ void UTDPNavigationComponent::BeginPlay()
 
 	if (FindNavigationVolume())
 	{
+		mNavigationPath = MakeShared<TDPNavigationPath>();
+
 		switch (PathFinder)
 		{
 		case ETDPPathFinder::AStar:
@@ -131,13 +146,13 @@ bool UTDPNavigationComponent::FindPath(const FVector& targetPosition)
 			return false;
 		}
 
-		mNavigationPath.Reset();
-		mPathFinder->FindPath(startLink, targetLink, startPosition, targetPosition, mNavigationPath);
-		mNavigationPath.SetIsReady(true);
+		mNavigationPath->Reset();
+		mPathFinder->FindPath(startLink, targetLink, startPosition, targetPosition, *mNavigationPath);
+		mNavigationPath->SetIsReady(true);
 
 		if (DrawPath)
 		{
-			mNavigationPath.DrawDebugVisualization(GetWorld(), *mNavigationVolume);
+			mNavigationPath->DrawDebugVisualization(GetWorld(), *mNavigationVolume);
 		}
 
 		return true;
@@ -150,5 +165,76 @@ bool UTDPNavigationComponent::FindPath(const FVector& targetPosition)
 	}
 
 	return false;
+}
+
+bool UTDPNavigationComponent::FindPathAsync(const FVector& targetPosition, FThreadSafeBool& complete)
+{
+	FVector startPosition;
+	GetPawnPosition(startPosition);
+
+#if WITH_EDITOR
+	UE_LOG(CinnamonLog, Log, TEXT("Finding path from %s and %s"), *startPosition.ToString(), *targetPosition.ToString());
+#endif
+
+	TDPNodeLink startLink;
+	TDPNodeLink targetLink;
+	if (IsNavigationPossible())
+	{
+		// Get the nav link from our volume
+		if (!mNavigationVolume->GetLinkFromPosition(startPosition, startLink))
+		{
+#if WITH_EDITOR
+			UE_LOG(CinnamonLog, Error, TEXT("Path finder failed to find start navigation link"));
+#endif
+			return false;
+		}
+
+		if (!mNavigationVolume->GetLinkFromPosition(targetPosition, targetLink))
+		{
+#if WITH_EDITOR
+			UE_LOG(CinnamonLog, Error, TEXT("Path finder failed to find target navigation link"));
+#endif
+			return false;
+		}
+
+		if (mCurrentAsyncTask.IsValid() && !mCurrentAsyncTask->IsDone())
+		{
+			if (mCurrentAsyncTask->Cancel())
+			{
+				mNavigationPath->Reset();
+				mCurrentAsyncTask = MakeShared<FAsyncTask<FindPathTask>>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete);
+				mCurrentAsyncTask->StartBackgroundTask();
+			}
+		}
+		else
+		{
+			mNavigationPath->Reset();
+			mCurrentAsyncTask = MakeShared<FAsyncTask<FindPathTask>>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete);
+			mCurrentAsyncTask->StartBackgroundTask();
+		}
+
+		//mNavigationPath->Reset();
+		//(new FAutoDeleteAsyncTask<FindPathTask>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete))->StartBackgroundTask();
+
+		return true;
+	}
+	else
+	{
+#if WITH_EDITOR
+		UE_LOG(CinnamonLog, Error, TEXT("Pawn is not inside an navigation volume, or navigation data has not been generated"));
+#endif
+	}
+
+	return false;
+}
+
+TSharedPtr<TDPNavigationPath> UTDPNavigationComponent::GetPath()
+{
+	return mNavigationPath;
+}
+
+const ATDPVolume* UTDPNavigationComponent::GetVolume() const
+{
+	return mNavigationVolume;
 }
 

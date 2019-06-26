@@ -189,11 +189,23 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 					child.SetLayerIndex(0);
 					child.SetNodeIndex(currentLeaf);
 					child.SetSubnodeIndex(0);
+#if WITH_EDITOR
+					// Debug
+					if (DrawOnlyBlockedLeafVoxels)
+					{
+						DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
+					}
+
+					if (DrawOctreeMortonCodes)
+					{
+						DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
+					}
+#endif
 				}
 
 #if WITH_EDITOR
 				// Debug
-				if (DrawVoxels)
+				if (DrawLeafVoxels && !DrawOnlyBlockedLeafVoxels)
 				{
 					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
 				}
@@ -292,7 +304,7 @@ void ATDPVolume::RasterizeLeafNode(const FVector& origin, NodeIndexType leaf)
 
 #if WITH_EDITOR
 			// Debug
-			if (DrawLeafVoxels)
+			if (DrawMiniLeafVoxels)
 			{
 				DrawNodeVoxel(position, FVector(leafSize / 2), FColor::Emerald);
 			}
@@ -325,7 +337,8 @@ void ATDPVolume::SetNeighborLinks(const LayerIndexType layer)
 			auto currentLayer = layer;
 			// find the closest neighbor, start by looking in the current node's layer
 			// go up the layers if no valid neighbor was found in that layer
-			while (!FindNeighborLink(currentLayer, currentNodeIndex, j, link, nodePosition))
+			while (!FindNeighborLink(currentLayer, currentNodeIndex, j, link, nodePosition)
+				&& currentLayer < mOctree.Layers.Num() - 2)
 			{
 				auto& parentLink = mOctree.GetLayer(currentLayer)[currentNodeIndex].GetParent();
 				if (parentLink.IsValid())
@@ -488,10 +501,16 @@ bool ATDPVolume::GetNodePositionFromLink(TDPNodeLink link, FVector& position) co
 	// if layer 0 and valid children, check 64 bit leaf for any set bits
 	if (link.LayerIndex == 0 && node.GetFirstChild().IsValid())
 	{
+		/*FVector origin = position - FVector(mLayerVoxelHalfSizeCache[0]);
+		float leafSize = mLayerVoxelHalfSizeCache[0] / 2;
+		uint_fast32_t x, y, z;
+		libmorton::morton3D_64_decode(link.SubnodeIndex, x, y, z);
+		position = origin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);*/
 		float voxelSize = mLayerVoxelHalfSizeCache[0] * 2;
 		uint_fast32_t x, y, z;
 		libmorton::morton3D_64_decode(link.SubnodeIndex, x, y, z);
 		position += FVector(x * voxelSize / 4, y * voxelSize / 4, z * voxelSize / 4) - FVector(voxelSize * 0.375f);
+
 		const auto& leafNode = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
 
 		return !leafNode.GetSubnode(link.SubnodeIndex);
@@ -504,6 +523,9 @@ bool ATDPVolume::GetLinkFromPosition(const FVector& position, TDPNodeLink& link)
 {
 	if (!IsPointInside(position))
 	{
+#if WITH_EDITOR
+		UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: position outside the navigation volume."));
+#endif
 		return false;
 	}
 
@@ -542,24 +564,55 @@ bool ATDPVolume::GetLinkFromPosition(const FVector& position, TDPNodeLink& link)
 				{
 					const auto& leaf = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
 					float voxelHalfSize = mLayerVoxelHalfSizeCache[currentLayer];
+					float leafSize = voxelHalfSize / 2;
 
 					FVector nodePosition;
 					GetNodePosition(currentLayer, node.GetMortonCode(), nodePosition);
 					FVector nodeOrigin = nodePosition - FVector(voxelHalfSize);
 					FVector nodeLocalPosition = position - nodeOrigin;
 
-					FIntVector mortonPosition;
-					mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / voxelHalfSize / 2);
-					mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / voxelHalfSize / 2);
-					mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / voxelHalfSize / 2);
+					int32 leafIndex;
+					FVector leafPosition;
+					bool found = false;
+					for (leafIndex = 0; leafIndex < 64; ++leafIndex)
+					{
+						uint_fast32_t x, y, z;
+						libmorton::morton3D_64_decode(leafIndex, x, y, z);
+						leafPosition = nodeOrigin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
+						if ((position.X >= leafPosition.X - (leafSize / 2)) && (position.X <= leafPosition.X + (leafSize / 2)) &&
+							(position.Y >= leafPosition.Y - (leafSize / 2)) && (position.Y <= leafPosition.Y + (leafSize / 2)) &&
+							(position.Z >= leafPosition.Z - (leafSize / 2)) && (position.Z <= leafPosition.Z + (leafSize / 2)))
+						{
+							found = true;
+							break;
+						}
+					}
+
+					if (!found)
+					{
+#if WITH_EDITOR
+						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: could not find node."));
+#endif
+						return false;
+					}
+
+					/*FIntVector mortonPosition;
+					mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / (voxelHalfSize / 2));
+					mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / (voxelHalfSize / 2));
+					mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / (voxelHalfSize / 2));*/
 
 					link.SetLayerIndex(currentLayer);
 					link.SetNodeIndex(i);
 
-					MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+					//MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
 
 					if (leaf.GetSubnode(leafIndex))
 					{
+#if WITH_EDITOR
+						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: node at position %s is blocked."), *position.ToString());
+						DrawNodeVoxel(leafPosition, FVector(mLayerVoxelHalfSizeCache[0] / 4), FColor::Emerald);
+						DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[0]), DebugHelper::LayerColors[0]);
+#endif
 						return false;
 					}
 
@@ -577,19 +630,23 @@ bool ATDPVolume::GetLinkFromPosition(const FVector& position, TDPNodeLink& link)
 		}
 	}
 
+#if WITH_EDITOR
+	UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: could not find a node for the given link."));
+#endif
+
 	return false;
 }
 
-void ATDPVolume::GetVoxelMortonPosition(const FVector & position, const LayerIndexType layer, FIntVector& mortonPosition) const
+void ATDPVolume::GetVoxelMortonPosition(const FVector& position, const LayerIndexType layer, FIntVector& mortonPosition) const
 {
 	FVector mortonOrigin = mOrigin - mExtents;
 	FVector localPosition = position - mortonOrigin;
 
 	float voxelSize = mLayerVoxelHalfSizeCache[layer] * 2;
 
-	mortonPosition.X = FMath::FloorToInt((localPosition.X / voxelSize));
-	mortonPosition.Y = FMath::FloorToInt((localPosition.Y / voxelSize));
-	mortonPosition.Z = FMath::FloorToInt((localPosition.Z / voxelSize));
+	mortonPosition.X = FMath::FloorToInt(localPosition.X / voxelSize);
+	mortonPosition.Y = FMath::FloorToInt(localPosition.Y / voxelSize);
+	mortonPosition.Z = FMath::FloorToInt(localPosition.Z / voxelSize);
 }
 
 int32 ATDPVolume::GetTotalLayers() const
@@ -682,7 +739,7 @@ void ATDPVolume::GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNod
 						{
 							for (const auto& leafIndex : NodeHelper::LeafChildOffsets[i])
 							{
-								auto leafLink = neighbor->GetFirstChild();
+								auto leafLink = currentNode->GetFirstChild();
 								const auto& leafNode = mOctree.LeafNodes[leafLink.NodeIndex];
 								leafLink.SetSubnodeIndex(leafIndex);
 
@@ -797,12 +854,22 @@ bool ATDPVolume::IsPointInside(const FVector& point) const
 	return GetComponentsBoundingBox(true).IsInside(point);
 }
 
-void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link) const
+void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color, const FString& label) const
 {
 	FVector position;
-	GetNodePosition(link.LayerIndex, link.NodeIndex, position);
+	GetNodePositionFromLink(link, position);
 
-	//TODO
+	const auto& node = mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
+	float size = mLayerVoxelHalfSizeCache[link.LayerIndex];
+
+	// if layer 0 and valid children
+	if (link.LayerIndex == 0 && node.GetFirstChild().IsValid())
+	{
+		size /= 4;
+	}
+
+	DrawNodeVoxel(position, FVector(size), color);
+	DrawDebugString(GetWorld(), position, label, nullptr, color);
 }
 
 bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const

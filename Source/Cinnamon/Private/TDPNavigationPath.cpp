@@ -18,8 +18,6 @@ void TDPNavigationPath::DrawDebugVisualization(UWorld* world, const ATDPVolume& 
 	{
 		TDPPathPoint& point = mPath[i];
 
-		FVector offSet(0.0f);
-
 		if (point.IsLeafChild)
 		{
 			float size = volume.GetVoxelSizeInLayer(point.LayerIndex) / 8;
@@ -31,8 +29,34 @@ void TDPNavigationPath::DrawDebugVisualization(UWorld* world, const ATDPVolume& 
 			DrawDebugBox(world, point.Position, FVector(size), DebugHelper::LayerColors[point.LayerIndex], true);
 		}
 
-		DrawDebugString(world, point.Position, FString::FromInt(mPath.Num() - i - 1), nullptr, FColor::Black);
-		//DrawDebugSphere(world, point.Position + offSet, 30.0f, 20, FColor::Emerald, true, -1.0f, 0, 100.0f);
+		DrawDebugString(world, point.Position, FString::FromInt(i + 1), nullptr, FColor::Black);
+#if WITH_EDITOR
+		UE_LOG(CinnamonLog, Log, TEXT("Point %i: (%f, %f, %f)"), i + 1, point.Position.X, point.Position.Y, point.Position.Z);
+#endif
+	}
+
+	if (mPath.Num() > 0)
+	{
+		TDPNodeLink link;
+		volume.GetLinkFromPosition(mPath[mPath.Num() - 1].Position, link);
+		FVector pos;
+		volume.GetNodePositionFromLink(link, pos);
+
+		if (mPath[mPath.Num() - 1].IsLeafChild)
+		{
+			float size = volume.GetVoxelSizeInLayer(link.LayerIndex) / 8;
+			DrawDebugBox(world, pos, FVector(size), FColor::Emerald, true);
+		}
+		else
+		{
+			float size = volume.GetVoxelSizeInLayer(link.LayerIndex) / 2;
+			DrawDebugBox(world, pos, FVector(size), DebugHelper::LayerColors[link.LayerIndex], true);
+		}
+
+		DrawDebugString(world, pos, FString::FromInt(mPath.Num()), nullptr, FColor::Black);
+#if WITH_EDITOR
+		UE_LOG(CinnamonLog, Log, TEXT("Point %i: (%f, %f, %f)"), mPath.Num(), mPath[mPath.Num() - 1].Position.X, mPath[mPath.Num() - 1].Position.Y, mPath[mPath.Num() - 1].Position.Z);
+#endif
 	}
 }
 
@@ -45,11 +69,18 @@ void TDPNavigationPath::CreateUENavigationPath(FNavigationPath& path)
 	{
 		pathPoints.Add(point.Position);
 	}
+
+	// temporary workaround for invalid paths of size 1
+	if (pathPoints.Num() == 1)
+	{
+		pathPoints.Emplace(pathPoints[0]);
+	}
 }
 
 void TDPNavigationPath::Reset()
 {
 	mPath.Reset();
+	mIsReady = false;
 }
 
 bool TDPNavigationPath::IsReady() const

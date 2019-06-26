@@ -49,10 +49,16 @@ public:
 	bool DrawVoxels = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawLeafVoxels = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool DrawOnlyBlockedLeafVoxels = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	float VoxelThickness = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
-	bool DrawLeafVoxels = false;
+	bool DrawMiniLeafVoxels = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	bool DrawOctreeMortonCodes = false;
@@ -88,7 +94,7 @@ public:
 	void GetLeafNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
 	bool IsPointInside(const FVector& point) const;
 
-	void DrawVoxelFromLink(const TDPNodeLink& link) const;
+	void DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color = FColor::Black, const FString& label = FString()) const;
 
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Layers"))

@@ -1,8 +1,10 @@
 // Copyright 1998-2019 Epic Games, Inc. All Rights Reserved.
 
 #include "Cinnamon.h"
-
+#if WITH_EDITOR
 DEFINE_LOG_CATEGORY(CinnamonLog);
+DEFINE_LOG_CATEGORY(VisualCinnamonLog);
+#endif
 
 #define LOCTEXT_NAMESPACE "FCinnamonModule"
 

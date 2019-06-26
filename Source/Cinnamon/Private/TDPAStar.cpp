@@ -32,11 +32,15 @@ void TDPAStar::FindPath(const TDPNodeLink startLink, const TDPNodeLink endLink, 
 
 	uint32 iterations = 0;
 
-	do
+	while (currentLink != endLink)
 	{
 		const auto currentNode = mVolume->GetNodeFromLink(currentLink);
 		if (currentNode)
 		{
+#if WITH_EDITOR
+			/*if (iterations == 3)
+				mVolume->DrawVoxelFromLink(currentLink, FColor::White, FString::FromInt(iterations));*/
+#endif // WITH_EDITOR
 			if (currentLink.LayerIndex == 0 && currentNode->GetFirstChild().IsValid())
 			{
 				mVolume->GetLeafNeighborsFromLink(currentLink, neighbors);
@@ -68,6 +72,11 @@ void TDPAStar::FindPath(const TDPNodeLink startLink, const TDPNodeLink endLink, 
 						gScores.Emplace(neighbor, pathCost);
 						openSet.Add(neighbor);
 						priorityQueue.HeapPush(neighbor, comparator);
+
+#if WITH_EDITOR
+						/*if (iterations == 3)
+							mVolume->DrawVoxelFromLink(neighbor, FColor::Black, FString::FromInt(iterations));*/
+#endif // WITH_EDITOR
 					}
 				}
 			}
@@ -85,8 +94,7 @@ void TDPAStar::FindPath(const TDPNodeLink startLink, const TDPNodeLink endLink, 
 		priorityQueue.HeapPop(currentLink, comparator);
 		openSet.Remove(currentLink);
 		closedSet.Add(currentLink);
-
-	} while (currentLink != endLink);
+	}
 
 	if (currentLink == endLink)
 	{
