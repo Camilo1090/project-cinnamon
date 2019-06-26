@@ -31,6 +31,7 @@ void FindPathTask::DoWork()
 	if (pathFinder)
 	{
 		pathFinder->FindPath(mStartLink, mEndLink, mStartPosition, mEndPosition, mPath);
+		mPath.SetIsReady(true);
 	}
 
 	mComplete = true;

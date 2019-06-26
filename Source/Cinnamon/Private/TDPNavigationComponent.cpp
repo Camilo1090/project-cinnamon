@@ -18,6 +18,14 @@ UTDPNavigationComponent::UTDPNavigationComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
+UTDPNavigationComponent::~UTDPNavigationComponent()
+{
+	if (mCurrentAsyncTask.IsValid())
+	{
+		mCurrentAsyncTask->EnsureCompletion();
+	}
+}
+
 bool UTDPNavigationComponent::CanNavigate() const
 {
 	FVector pawnPosition;
@@ -31,7 +39,7 @@ bool UTDPNavigationComponent::CanNavigateToPosition(const FVector & position) co
 {
 	TDPNodeLink link;
 
-	return mNavigationVolume->GetLinkFromPosition(position, link) && CanNavigate();
+	return CanNavigate() && mNavigationVolume->GetLinkFromPosition(position, link);
 }
 
 // Called when the game starts
@@ -199,12 +207,12 @@ bool UTDPNavigationComponent::FindPathAsync(const FVector& targetPosition, FThre
 
 		if (mCurrentAsyncTask.IsValid() && !mCurrentAsyncTask->IsDone())
 		{
-			if (mCurrentAsyncTask->Cancel())
+			/*if (mCurrentAsyncTask->Cancel())
 			{
 				mNavigationPath->Reset();
 				mCurrentAsyncTask = MakeShared<FAsyncTask<FindPathTask>>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete);
 				mCurrentAsyncTask->StartBackgroundTask();
-			}
+			}*/
 		}
 		else
 		{

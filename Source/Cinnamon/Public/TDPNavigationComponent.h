@@ -22,6 +22,7 @@ class CINNAMON_API UTDPNavigationComponent : public UActorComponent
 public:	
 	// Sets default values for this component's properties
 	UTDPNavigationComponent();
+	~UTDPNavigationComponent();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Navigation | Debug")
 	bool DrawPath = true;
