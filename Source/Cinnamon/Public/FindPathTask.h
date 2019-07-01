@@ -14,7 +14,7 @@ class ATDPVolume;
 /**
  * 
  */
-class CINNAMON_API FindPathTask : public FNonAbandonableTask
+class CINNAMON_API FindPathTask// : public FNonAbandonableTask
 {
 	friend class FAutoDeleteAsyncTask<FindPathTask>;
 	friend class FAsyncTask<FindPathTask>;
@@ -38,6 +38,8 @@ protected:
 	FThreadSafeBool& mComplete;
 
 	void DoWork();
+	bool CanAbandon() const;
+	void Abandon();
 
 	FORCEINLINE TStatId GetStatId() const
 	{

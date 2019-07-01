@@ -8,7 +8,12 @@ TDPNode::TDPNode() :
 {
 }
 
-MortonCodeType TDPNode::GetMortonCode() const
+MortonCodeType& TDPNode::GetMortonCode()
+{
+	return mMortonCode;
+}
+
+const MortonCodeType& TDPNode::GetMortonCode() const
 {
 	return mMortonCode;
 }

@@ -58,7 +58,7 @@ public:
 protected:
 	void LogPathHelper();
 
-	FThreadSafeBool mAsyncTaskComplete;
+	FThreadSafeBool mAsyncTaskComplete = false;
 	bool mUseAsyncPathfinding;
 
 	UPROPERTY(BlueprintAssignable)

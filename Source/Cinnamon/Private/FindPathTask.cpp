@@ -36,3 +36,13 @@ void FindPathTask::DoWork()
 
 	mComplete = true;
 }
+
+bool FindPathTask::CanAbandon() const
+{
+	return true;
+}
+
+void FindPathTask::Abandon()
+{
+	mPath.Reset();
+}

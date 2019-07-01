@@ -16,7 +16,8 @@ public:
 	TDPNode();
 	~TDPNode() = default;
 
-	MortonCodeType GetMortonCode() const;
+	MortonCodeType& GetMortonCode();
+	const MortonCodeType& GetMortonCode() const;
 	void SetMortonCode(MortonCodeType code);
 
 	TDPNodeLink& GetParent();
@@ -38,3 +39,17 @@ private:
 	TDPNodeLink mFirstChild;
 	TDPNodeLink mNeighbors[6];
 };
+
+FORCEINLINE FArchive &operator <<(FArchive &Ar, TDPNode& node)
+{
+	Ar << node.GetMortonCode();
+	Ar << node.GetParent();
+	Ar << node.GetFirstChild();
+
+	for (int i = 0; i < 6; i++)
+	{
+		Ar << node.GetNeighbors()[i];
+	}
+
+	return Ar;
+}

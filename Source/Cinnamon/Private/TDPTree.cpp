@@ -42,6 +42,6 @@ int32 TDPTree::MemoryUsage() const
 
 void TDPTree::Clear()
 {
-	Layers.Empty();
-	LeafNodes.Empty();
+	Layers.Reset();
+	LeafNodes.Reset();
 }

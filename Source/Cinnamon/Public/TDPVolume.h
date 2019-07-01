@@ -41,6 +41,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding")
 	void Generate();
 
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding")
+	void Clear();
+
 public:
 	// Debug Info
 
@@ -93,10 +96,14 @@ public:
 	void GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
 	void GetLeafNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
 	bool IsPointInside(const FVector& point) const;
-
 	void DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color = FColor::Black, const FString& label = FString()) const;
 
+	virtual void Serialize(FArchive& Ar) override;
+
 private:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Enable Serialization"))
+	bool mEnableSerialization = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Layers"))
 	int32 mLayers = 5;
 

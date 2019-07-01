@@ -16,15 +16,11 @@ ATDPVolume::ATDPVolume(const FObjectInitializer& ObjectInitializer)	: Super(Obje
 	GetBrushComponent()->Mobility = EComponentMobility::Static;
 	BrushColor = FColor(FMath::RandRange(0, 255), FMath::RandRange(0, 255), FMath::RandRange(0, 255), 255);
 	bColored = true;
-
-	//Initialize();
-
-	//UE_LOG(CinnamonLog, Log, TEXT("Size of Link: %d"), sizeof(TDPNodeLink));
 }
 
 void ATDPVolume::BeginPlay()
 {
-
+	Super::BeginPlay();
 }
 
 void ATDPVolume::PostRegisterAllComponents()
@@ -71,9 +67,8 @@ void ATDPVolume::Initialize()
 	bounds.GetCenterAndExtents(mOrigin, mExtents);
 	//DrawDebugBox(GetWorld(), mOrigin, mExtents, FQuat::Identity, DebugHelper::LayerColors[mLayers], true);
 
-	mBlockedIndices.Empty();
-	mOctree.Layers.Empty();
-	mOctree.LeafNodes.Empty();
+	mBlockedIndices.Reset();
+	mOctree.Clear();
 	mLayerVoxelHalfSizeCache.Reset();
 
 	mTotalLayers = mLayers + 1;
@@ -92,6 +87,7 @@ void ATDPVolume::Generate()
 
 #if WITH_EDITOR
 
+	GetWorld()->PersistentLineBatcher->SetComponentTickEnabled(false);
 	auto startTime = std::chrono::high_resolution_clock::now();
 
 #endif // WITH_EDITOR
@@ -127,6 +123,18 @@ void ATDPVolume::Generate()
 	UE_LOG(CinnamonLog, Log, TEXT("Memory Usage: %d Bytes"), mTotalBytes);
 
 #endif
+}
+
+void ATDPVolume::Clear()
+{
+	mOctree.Clear();
+	mBlockedIndices.Reset();
+	mTotalLayers = 0;
+	mTotalBytes = 0;
+	mTotalLayerNodes = 0;
+	mTotalLeafNodes = 0;
+	FlushDebugStrings(GetWorld());
+	FlushPersistentDebugLines(GetWorld());
 }
 
 void ATDPVolume::RasterizeLowRes()
@@ -870,6 +878,20 @@ void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color,
 
 	DrawNodeVoxel(position, FVector(size), color);
 	DrawDebugString(GetWorld(), position, label, nullptr, color);
+}
+
+void ATDPVolume::Serialize(FArchive& Ar)
+{
+	Super::Serialize(Ar);
+
+	if (mEnableSerialization)
+	{
+		Ar << mOctree;
+		Ar << mLayerVoxelHalfSizeCache;
+
+		mTotalLayers = mOctree.Layers.Num();
+		mTotalBytes = mOctree.MemoryUsage();
+	}
 }
 
 bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const

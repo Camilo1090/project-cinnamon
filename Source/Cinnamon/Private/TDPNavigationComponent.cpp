@@ -20,9 +20,12 @@ UTDPNavigationComponent::UTDPNavigationComponent()
 
 UTDPNavigationComponent::~UTDPNavigationComponent()
 {
-	if (mCurrentAsyncTask.IsValid())
+	for (auto& task : mTasks)
 	{
-		mCurrentAsyncTask->EnsureCompletion();
+		if (task.IsValid())
+		{
+			task->EnsureCompletion(false);
+		}
 	}
 }
 
@@ -205,26 +208,30 @@ bool UTDPNavigationComponent::FindPathAsync(const FVector& targetPosition, FThre
 			return false;
 		}
 
-		if (mCurrentAsyncTask.IsValid() && !mCurrentAsyncTask->IsDone())
+		bool executed = false;
+		if (CanFindPathAsync(targetLink))
 		{
-			/*if (mCurrentAsyncTask->Cancel())
+			/*if (mCurrentAsyncTask.IsValid() && !mCurrentAsyncTask->Cancel())
 			{
-				mNavigationPath->Reset();
-				mCurrentAsyncTask = MakeShared<FAsyncTask<FindPathTask>>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete);
-				mCurrentAsyncTask->StartBackgroundTask();
+				mCurrentAsyncTask->EnsureCompletion(false);
 			}*/
-		}
-		else
-		{
+
 			mNavigationPath->Reset();
+			mNavigationPaths.Add(mNavigationPath);
+			mNavigationPath = MakeShared<TDPNavigationPath>();
 			mCurrentAsyncTask = MakeShared<FAsyncTask<FindPathTask>>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete);
 			mCurrentAsyncTask->StartBackgroundTask();
+			mTasks.Add(mCurrentAsyncTask);
+			mLastTargetLink = targetLink;
+			mMoveRequested = false;
+
+			executed = true;
 		}
 
 		//mNavigationPath->Reset();
 		//(new FAutoDeleteAsyncTask<FindPathTask>(GetWorld(), *mNavigationVolume, PathFinderSettings, PathFinder, Heuristic, startLink, targetLink, startPosition, targetPosition, *mNavigationPath, complete))->StartBackgroundTask();
 
-		return true;
+		return executed;
 	}
 	else
 	{
@@ -236,6 +243,19 @@ bool UTDPNavigationComponent::FindPathAsync(const FVector& targetPosition, FThre
 	return false;
 }
 
+bool UTDPNavigationComponent::CanFindPathAsync(const FVector& targetPosition) const
+{
+	TDPNodeLink targetLink;
+	mNavigationVolume->GetLinkFromPosition(targetPosition, targetLink);
+
+	return targetLink != mLastTargetLink;
+}
+
+bool UTDPNavigationComponent::CanFindPathAsync(const TDPNodeLink& targetLink) const
+{
+	return targetLink != mLastTargetLink;
+}
+
 TSharedPtr<TDPNavigationPath> UTDPNavigationComponent::GetPath()
 {
 	return mNavigationPath;
@@ -244,5 +264,15 @@ TSharedPtr<TDPNavigationPath> UTDPNavigationComponent::GetPath()
 const ATDPVolume* UTDPNavigationComponent::GetVolume() const
 {
 	return mNavigationVolume;
+}
+
+bool UTDPNavigationComponent::GetMoveRequested() const
+{
+	return mMoveRequested;
+}
+
+void UTDPNavigationComponent::SetMoveRequested(bool requested)
+{
+	mMoveRequested = requested;
 }
 

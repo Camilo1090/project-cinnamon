@@ -22,3 +22,11 @@ struct CINNAMON_API TDPTree
 	int32 MemoryUsage() const;
 	void Clear();
 };
+
+FORCEINLINE FArchive &operator <<(FArchive &Ar, TDPTree& octree)
+{
+	Ar << octree.Layers;
+	Ar << octree.LeafNodes;
+
+	return Ar;
+}

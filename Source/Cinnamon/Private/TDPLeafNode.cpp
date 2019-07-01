@@ -19,6 +19,16 @@ bool TDPLeafNode::GetSubnode(MortonCodeType code) const
 	return (mSubnodes & (1ULL << code)) != 0;
 }
 
+uint64& TDPLeafNode::GetSubnodes()
+{
+	return mSubnodes;
+}
+
+const uint64& TDPLeafNode::GetSubnodes() const
+{
+	return mSubnodes;
+}
+
 bool TDPLeafNode::IsFullyBlocked() const
 {
 	return mSubnodes == -1;

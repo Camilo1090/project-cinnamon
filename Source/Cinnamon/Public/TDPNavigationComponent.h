@@ -56,6 +56,7 @@ protected:
 
 protected:
 	TSharedPtr<TDPNavigationPath> mNavigationPath = nullptr;
+	TArray<TSharedPtr<TDPNavigationPath>> mNavigationPaths;
 	const ATDPVolume* mNavigationVolume = nullptr;
 	TSharedPtr<IPathFinder> mPathFinder = nullptr;
 
@@ -70,9 +71,18 @@ public:
 
 	bool FindPathAsync(const FVector& targetPosition, FThreadSafeBool& complete);
 
+	bool CanFindPathAsync(const FVector& targetPosition) const;
+	bool CanFindPathAsync(const TDPNodeLink& targetLink) const;
+
 	TSharedPtr<TDPNavigationPath> GetPath();
 	const ATDPVolume* GetVolume() const;
 
+	bool GetMoveRequested() const;
+	void SetMoveRequested(bool requested);
+
 private:
 	TSharedPtr<FAsyncTask<FindPathTask>> mCurrentAsyncTask = nullptr;
+	TArray<TSharedPtr<FAsyncTask<FindPathTask>>> mTasks;
+	TDPNodeLink mLastTargetLink;
+	bool mMoveRequested = false;
 };

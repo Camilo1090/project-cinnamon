@@ -13,6 +13,7 @@
 #include "VisualLogger/VisualLogger.h"
 #include "AIResources.h"
 #include "GameplayTasksComponent.h"
+#include "DrawDebugHelpers.h"
 
 UAITask_TDPMoveTo::UAITask_TDPMoveTo(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -95,7 +96,7 @@ void UAITask_TDPMoveTo::SetUp(AAIController* Controller, const FAIMoveRequest& I
 	}
 
 	// Use the path instance from the navcomponent
-	mPath = mNavigationComponent->GetPath();
+	//mPath = mNavigationComponent->GetPath();
 }
 
 void UAITask_TDPMoveTo::SetContinuousGoalTracking(bool bEnable)
@@ -105,7 +106,7 @@ void UAITask_TDPMoveTo::SetContinuousGoalTracking(bool bEnable)
 
 void UAITask_TDPMoveTo::TickTask(float DeltaTime)
 {
-	if (mAsyncTaskComplete)
+	if (mAsyncTaskComplete && !mNavigationComponent->GetMoveRequested())
 	{
 		HandleAsyncPathTaskComplete();
 	}
@@ -166,9 +167,12 @@ void UAITask_TDPMoveTo::PerformMove()
 	// Prepare the move first (check for early out)
 	CheckPathPreConditions();
 
-	ResetObservers();
-	ResetTimers();
-	ResetPaths();
+	if (!mUseAsyncPathfinding || mNavigationComponent->CanFindPathAsync(MoveRequest.IsMoveToActorRequest() ? MoveRequest.GetGoalActor()->GetActorLocation() : MoveRequest.GetGoalLocation()))
+	{
+		ResetObservers();
+		ResetTimers();
+		ResetPaths();
+	}
 
 	if (mResult.Code == ETDPPathfindingRequestResult::AlreadyAtGoal)
 	{
@@ -200,7 +204,7 @@ void UAITask_TDPMoveTo::PerformMove()
 		case ETDPPathfindingRequestResult::Deferred: // Async...we're waiting on the task to return
 		{
 			MoveRequestID = mResult.MoveId;
-			mAsyncTaskComplete = false;
+			//mAsyncTaskComplete = false;
 		} break;
 		default:
 			checkNoEntry();
@@ -336,6 +340,7 @@ void UAITask_TDPMoveTo::RequestPathSynchronous()
 
 	if (mNavigationComponent->FindPath(MoveRequest.IsMoveToActorRequest() ? MoveRequest.GetGoalActor()->GetActorLocation() : MoveRequest.GetGoalLocation()))
 	{
+		mPath = mNavigationComponent->GetPath();
 		mResult.Code = ETDPPathfindingRequestResult::Success;
 	}
 
@@ -351,10 +356,13 @@ void UAITask_TDPMoveTo::RequestPathAsync()
 	if (!TDPNavigationComponent)
 		return;
 
-	mAsyncTaskComplete = false;
+	//mAsyncTaskComplete = false;
 
 	// Request the async path
-	TDPNavigationComponent->FindPathAsync(MoveRequest.IsMoveToActorRequest() ? MoveRequest.GetGoalActor()->GetActorLocation() : MoveRequest.GetGoalLocation(), mAsyncTaskComplete);
+	FVector targetPosition = MoveRequest.IsMoveToActorRequest() ? MoveRequest.GetGoalActor()->GetActorLocation() : MoveRequest.GetGoalLocation();
+	TDPNavigationComponent->FindPathAsync(targetPosition, mAsyncTaskComplete);
+	mPath = mNavigationComponent->GetPath();
+	mAsyncTaskComplete = TDPNavigationComponent->GetPath()->IsReady();
 
 	mResult.Code = ETDPPathfindingRequestResult::Deferred;
 }
@@ -403,11 +411,14 @@ void UAITask_TDPMoveTo::HandleAsyncPathTaskComplete()
 	mResult.Code = ETDPPathfindingRequestResult::Success;
 	// Request the move
 	RequestMove();
+	mNavigationComponent->SetMoveRequested(true);
 	// Flag that we've processed the task
 	mAsyncTaskComplete = false;
 
 	if (mNavigationComponent->DrawPath)
 	{
+		FlushDebugStrings(mNavigationComponent->GetWorld());
+		FlushPersistentDebugLines(mNavigationComponent->GetWorld());
 		mPath->DrawDebugVisualization(mNavigationComponent->GetWorld(), *mNavigationComponent->GetVolume());
 	}
 }
