@@ -35,7 +35,7 @@ FORCEINLINE uint32 GetTypeHash(const TDPNodeLink& link)
 	return *reinterpret_cast<const uint32*>(&link);
 }
 
-FORCEINLINE FArchive &operator <<(FArchive &Ar, TDPNodeLink& link)
+FORCEINLINE FArchive& operator<<(FArchive& Ar, TDPNodeLink& link)
 {
 	Ar.Serialize(&link, sizeof(TDPNodeLink));
 

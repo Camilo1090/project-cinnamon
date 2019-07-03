@@ -40,7 +40,7 @@ private:
 	TDPNodeLink mNeighbors[6];
 };
 
-FORCEINLINE FArchive &operator <<(FArchive &Ar, TDPNode& node)
+FORCEINLINE FArchive& operator<<(FArchive& Ar, TDPNode& node)
 {
 	Ar << node.GetMortonCode();
 	Ar << node.GetParent();

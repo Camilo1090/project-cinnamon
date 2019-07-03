@@ -133,6 +133,54 @@ void ATDPVolume::Clear()
 	mTotalBytes = 0;
 	mTotalLayerNodes = 0;
 	mTotalLeafNodes = 0;
+	FlushDrawnOctree();
+}
+
+void ATDPVolume::DrawOctree() const
+{
+	FlushDrawnOctree();
+
+	for (int32 i = 0; i < mOctree.Layers.Num(); ++i)
+	{
+		for (const auto& node : mOctree.GetLayer(i))
+		{
+			DrawNodeVoxel(i, node);
+		}
+	}
+}
+
+void ATDPVolume::DrawLeafNodes() const
+{
+	FlushDrawnOctree();
+
+	if (mOctree.Layers.Num() > 0)
+	{
+		for (const auto& node : mOctree.GetLayer(0))
+		{
+			DrawNodeVoxel(0, node);
+		}
+	}
+}
+
+void ATDPVolume::DrawBlockedMiniLeafNodes() const
+{
+	for (int32 i = 0; i < mOctree.LeafNodes.Num(); ++i)
+	{
+		for (int32 j = 0; j < 64; ++j)
+		{
+			if (mOctree.LeafNodes[i].GetSubnode(j))
+			{
+				FVector position;
+				TDPNodeLink link{ 0, i, static_cast<SubnodeIndexType>(j) };
+				GetNodePositionFromLink(link, position);
+				DrawNodeVoxel(position, FVector(mLayerVoxelHalfSizeCache[0] / 4), FColor::Emerald);
+			}
+		}
+	}
+}
+
+void ATDPVolume::FlushDrawnOctree() const
+{
 	FlushDebugStrings(GetWorld());
 	FlushPersistentDebugLines(GetWorld());
 }
@@ -911,6 +959,14 @@ bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCod
 	}
 
 	return false;
+}
+
+void ATDPVolume::DrawNodeVoxel(const LayerIndexType layer, const TDPNode& node) const
+{
+	FVector position;
+	GetNodePosition(layer, node.GetMortonCode(), position);
+
+	DrawNodeVoxel(position, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
 }
 
 void ATDPVolume::DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const

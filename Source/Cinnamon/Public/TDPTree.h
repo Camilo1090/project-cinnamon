@@ -23,7 +23,7 @@ struct CINNAMON_API TDPTree
 	void Clear();
 };
 
-FORCEINLINE FArchive &operator <<(FArchive &Ar, TDPTree& octree)
+FORCEINLINE FArchive& operator<<(FArchive& Ar, TDPTree& octree)
 {
 	Ar << octree.Layers;
 	Ar << octree.LeafNodes;

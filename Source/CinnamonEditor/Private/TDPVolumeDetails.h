@@ -22,6 +22,10 @@ public:
 
 	FReply OnGenerateSVOClicked();
 	FReply OnClearSVOClicked();
+	FReply OnDrawSVOClicked();
+	FReply OnDrawLeafNodesClicked();
+	FReply OnDrawMiniLeafNodesClicked();
+	FReply OnFlushDrawnSVOClicked();
 
 private:
 	TWeakObjectPtr<ATDPVolume> mVolume;

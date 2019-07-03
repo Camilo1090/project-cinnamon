@@ -44,6 +44,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding")
 	void Clear();
 
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding Debug")
+	void DrawOctree() const;
+
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding Debug")
+	void DrawLeafNodes() const;
+
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding Debug")
+	void DrawBlockedMiniLeafNodes() const;
+
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding Debug")
+	void FlushDrawnOctree() const;
+
 public:
 	// Debug Info
 
@@ -151,6 +163,7 @@ private:
 	bool GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const;
 	void GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const;
 
+	void DrawNodeVoxel(const LayerIndexType layer, const TDPNode& node) const;
 	void DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const;
 
 	TArray<float> mLayerVoxelHalfSizeCache;
