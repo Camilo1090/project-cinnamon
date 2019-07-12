@@ -9,10 +9,13 @@
 #include "TDPNode.h"
 #include "libmorton/include/morton.h"
 #include "DrawDebugHelpers.h"
+#include "TDPDynamicObstacleComponent.h"
 #include <chrono>
 
 ATDPVolume::ATDPVolume(const FObjectInitializer& ObjectInitializer)	: Super(ObjectInitializer)
-{	
+{
+	PrimaryActorTick.bCanEverTick = true;
+
 	GetBrushComponent()->Mobility = EComponentMobility::Static;
 	BrushColor = FColor(FMath::RandRange(0, 255), FMath::RandRange(0, 255), FMath::RandRange(0, 255), 255);
 	bColored = true;
@@ -21,6 +24,21 @@ ATDPVolume::ATDPVolume(const FObjectInitializer& ObjectInitializer)	: Super(Obje
 void ATDPVolume::BeginPlay()
 {
 	Super::BeginPlay();
+
+	FBox bounds = GetComponentsBoundingBox(true);
+	bounds.GetCenterAndExtents(mOrigin, mExtents);
+
+	FCollisionQueryParams collisionParams;
+	collisionParams.bFindInitialOverlaps = true;
+	collisionParams.bTraceComplex = mComplexCollision;
+
+	TArray<FOverlapResult> results;
+	GetWorld()->OverlapMultiByChannel(results, mOrigin, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(mExtents / 2), collisionParams);
+
+	for (auto& result : results) 
+	{
+		mActors.Emplace(result.GetActor());
+	}
 }
 
 void ATDPVolume::PostRegisterAllComponents()
@@ -31,6 +49,43 @@ void ATDPVolume::PostRegisterAllComponents()
 void ATDPVolume::PostUnregisterAllComponents()
 {
 	Super::PostUnregisterAllComponents();
+}
+
+void ATDPVolume::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (mDynamicUpdateEnabled && mOctreeDirty)
+	{
+#if WITH_EDITOR
+		UE_LOG(CinnamonLog, Log, TEXT("Updating Octree..."));
+
+		auto startTime = std::chrono::high_resolution_clock::now();
+
+#endif // WITH_EDITOR
+
+		// do magic
+		FlushDrawnOctree();
+		UpdateOctree();
+
+#if WITH_EDITOR
+		float totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count() / 1000.0f;
+		UE_LOG(CinnamonLog, Log, TEXT("Dynamic Update Time (s): %f"), totalTime);
+
+		if (DrawVoxels)
+		{
+			DrawOctree();
+		}
+
+		if (DrawMiniLeafVoxels)
+		{
+			//FlushDrawnOctree();
+			//DrawBlockedMiniLeafNodes();
+		}
+#endif
+		mOctreeDirty = false;
+		mPendingDynamicObstacles.Reset();
+	}
 }
 
 #if WITH_EDITOR
@@ -61,11 +116,11 @@ void ATDPVolume::Initialize()
 {
 #if WITH_EDITOR
 	UE_LOG(CinnamonLog, Log, TEXT("Initalizing..."));
+	FlushDrawnOctree();
 #endif
 
 	FBox bounds = GetComponentsBoundingBox(true);
 	bounds.GetCenterAndExtents(mOrigin, mExtents);
-	//DrawDebugBox(GetWorld(), mOrigin, mExtents, FQuat::Identity, DebugHelper::LayerColors[mLayers], true);
 
 	mBlockedIndices.Reset();
 	mOctree.Clear();
@@ -142,9 +197,9 @@ void ATDPVolume::DrawOctree() const
 
 	for (int32 i = 0; i < mOctree.Layers.Num(); ++i)
 	{
-		for (const auto& node : mOctree.GetLayer(i))
+		for (int32 j = 0; j < mOctree.Layers[i].Num(); ++j)
 		{
-			DrawNodeVoxel(i, node);
+			DrawNodeVoxel(i, mOctree.Layers[i][j]);
 		}
 	}
 }
@@ -183,6 +238,15 @@ void ATDPVolume::FlushDrawnOctree() const
 {
 	FlushDebugStrings(GetWorld());
 	FlushPersistentDebugLines(GetWorld());
+}
+
+FVector ATDPVolume::GetRandomPointInVolume() const
+{
+	float x = FMath::RandRange(mOrigin.X - (mExtents.X / 2), mOrigin.X + (mExtents.X / 2));
+	float y = FMath::RandRange(mOrigin.Y - (mExtents.Y / 2), mOrigin.Y + (mExtents.Y / 2));
+	float z = FMath::RandRange(mOrigin.Z - (mExtents.Z / 2), mOrigin.Z + (mExtents.Z / 2));
+
+	return FVector(x, y, z);
 }
 
 void ATDPVolume::RasterizeLowRes()
@@ -251,11 +315,6 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 					{
 						DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
 					}
-
-					if (DrawOctreeMortonCodes)
-					{
-						DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
-					}
 #endif
 				}
 
@@ -264,11 +323,6 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				if (DrawLeafVoxels && !DrawOnlyBlockedLeafVoxels)
 				{
 					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
-				}
-
-				if (DrawOctreeMortonCodes)
-				{
-					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
 #endif
 			}
@@ -292,7 +346,7 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				GetNodePosition(layer, node.GetMortonCode(), nodePosition);
 
 				NodeIndexType firstChildIndex;
-				if (GetNodeIndexInLayer(layer - 1, node.GetMortonCode() << 3, firstChildIndex))
+				if (GetNodeIndexFromMortonCode(layer - 1, node.GetMortonCode() << 3, firstChildIndex))
 				{
 					// set parent -> first child link
 					auto& firstChild = node.GetFirstChild();
@@ -331,11 +385,6 @@ void ATDPVolume::RasterizeLayer(LayerIndexType layer)
 				if (DrawVoxels)
 				{
 					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
-				}
-
-				if (DrawOctreeMortonCodes)
-				{
-					DrawDebugString(GetWorld(), nodePosition, FString::FromInt(layer) + ":" + FString::FromInt(nodeIndex), nullptr, DebugHelper::LayerColors[layer]);
 				}
 #endif
 			}
@@ -405,7 +454,7 @@ void ATDPVolume::SetNeighborLinks(const LayerIndexType layer)
 				else
 				{
 					++currentLayer;
-					GetNodeIndexInLayer(currentLayer, node.GetMortonCode() >> 3, currentNodeIndex);
+					GetNodeIndexFromMortonCode(currentLayer, node.GetMortonCode() >> 3, currentNodeIndex);
 				}
 			}
 		}
@@ -502,6 +551,287 @@ bool ATDPVolume::FindNeighborLink(const LayerIndexType layerIndex, const NodeInd
 	return false;
 }
 
+void ATDPVolume::UpdateOctree()
+{
+	if (mOptimizedDynamicUpdate)
+	{
+		TSet<TDPNodeLink> dirtySet;
+		
+		for (auto obstacle : mPendingDynamicObstacles)
+		{
+			check(IsValid(obstacle));
+
+			dirtySet.Append(obstacle->GetTrackedNodes());
+			obstacle->UpdateTrackedNodes();
+			dirtySet.Append(obstacle->GetTrackedNodes());
+		}
+
+		TArray<TDPNodeLink> dirtyArray = dirtySet.Array();
+		TArray<TPair<LayerIndexType, MortonCodeType>> codes;
+		codes.Reserve(dirtyArray.Num());
+
+		for (auto& link : dirtyArray)
+		{
+			const auto node = GetNodeFromLink(link);
+			codes.Emplace(static_cast<LayerIndexType>(link.LayerIndex), node->GetMortonCode());
+		}
+
+		for (auto& pair : codes)
+		{
+			NodeIndexType index;
+			if (GetNodeIndexFromMortonCode(pair.Key, pair.Value, index))
+			{
+				UpdateNode(TDPNodeLink(pair.Key, index, 0));
+			}
+		}
+
+		// gather orphans
+		codes.Reset();
+		for (int32 i = mLayers - 2; i >= 0; --i)
+		{
+			for (int32 j = 0; j < mOctree.Layers[i].Num(); ++j)
+			{
+				auto& node = mOctree.Layers[i][j];
+
+				NodeIndexType index;
+				if (!GetNodeIndexFromMortonCode(i + 1, node.GetMortonCode() >> 3, index))
+				{
+					codes.Emplace(static_cast<LayerIndexType>(i), node.GetMortonCode());
+				}
+			}
+		}
+
+		// remove orphans
+		for (auto& pair : codes)
+		{
+			NodeIndexType index;
+			if (GetNodeIndexFromMortonCode(pair.Key, pair.Value, index))
+			{
+				int32 first = index - (index % 8);
+				mOctree.Layers[pair.Key].RemoveAt(first, 8);
+
+				if (pair.Key == 0)
+				{
+					mOctree.LeafNodes.RemoveAt(first, 8);
+				}
+			}
+		}
+
+		// fix parent-child links
+		for (int32 i = mLayers - 2; i >= 0; --i)
+		{
+			for (int32 j = 0; j < mOctree.Layers[i].Num(); ++j)
+			{
+				auto& node = mOctree.Layers[i][j];
+
+				NodeIndexType index;
+				bool result = GetNodeIndexFromMortonCode(i + 1, node.GetMortonCode() >> 3, index);
+				check(result);
+				node.SetParent(TDPNodeLink(i + 1, index, 0));
+
+				if (j % 8 == 0)
+				{
+					mOctree.Layers[i + 1][index].SetFirstChild(TDPNodeLink(i, j, 0));
+				}
+			}
+		}
+
+		// fix leaf parent-child links
+		for (int32 i = 0; i < mOctree.Layers[0].Num(); ++i)
+		{
+			auto& child = mOctree.Layers[0][i].GetFirstChild();
+			child.SetLayerIndex(0);
+			child.SetNodeIndex(i);
+			child.SetSubnodeIndex(0);
+		}
+
+		if (DrawMiniLeafVoxels)
+		{
+			DrawBlockedMiniLeafNodes();
+		}
+
+		// fix neighbor links
+		for (int32 i = mLayers - 2; i >= 0; --i)
+		{
+			SetNeighborLinks(i);
+		}
+
+		for (auto obstacle : mPendingDynamicObstacles)
+		{
+			check(IsValid(obstacle));
+			obstacle->UpdateTrackedNodes();
+		}
+	}
+	else
+	{
+		Generate();
+	}
+}
+
+void ATDPVolume::UpdateNode(const TDPNodeLink link)
+{
+	const auto node = GetNodeFromLink(link);
+	check(node != nullptr);
+
+	FVector nodePosition;
+	GetNodePosition(link.LayerIndex, node->GetMortonCode(), nodePosition);
+
+	if (IsVoxelBlocked(nodePosition, mLayerVoxelHalfSizeCache[link.LayerIndex], true))
+	{
+		if (link.LayerIndex == 0)
+		{
+			UpdateLeafNode(nodePosition - FVector(mLayerVoxelHalfSizeCache[0]), link.NodeIndex);
+		}
+		else
+		{
+			TArray<TDPNodeLink> stack;
+			stack.Emplace(link);
+
+			while (stack.Num() > 0)
+			{
+				auto currentLink = stack.Pop();
+				auto currentNode = GetNodeFromLink(currentLink);
+				GetNodePosition(currentLink.LayerIndex, currentNode->GetMortonCode(), nodePosition);
+
+				if (IsVoxelBlocked(nodePosition, mLayerVoxelHalfSizeCache[currentLink.LayerIndex], true))
+				{
+					if (currentLink.LayerIndex == 0)
+					{
+						UpdateLeafNode(nodePosition - FVector(mLayerVoxelHalfSizeCache[0]), currentLink.NodeIndex);
+					}
+					else
+					{
+						if (currentNode->HasChildren())
+						{
+							for (int32 i = 0; i < 8; ++i)
+							{
+								auto childLink = currentNode->GetFirstChild();
+								childLink.NodeIndex += i;
+								stack.Emplace(childLink);
+							}
+						}
+						else
+						{
+							LayerIndexType childLayer = currentLink.LayerIndex - 1;
+
+							NodeIndexType index = FindInsertIndex(childLayer, currentNode->GetMortonCode() << 3);
+							mOctree.Layers[childLayer].InsertDefaulted(index, 8);
+
+							currentNode->SetFirstChild(TDPNodeLink(childLayer, index, 0));
+
+							for (int32 i = 0; i < 8; ++i)
+							{
+								auto& child = mOctree.Layers[childLayer][index + i];
+								child.SetParent(currentLink);
+								child.SetMortonCode((currentNode->GetMortonCode() << 3) + i);
+								stack.Emplace(childLayer, index + i, 0);
+							}
+
+							if (currentLink.LayerIndex == 1)
+							{
+								mOctree.LeafNodes.InsertDefaulted(index, 8);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else if (node->GetParent().IsValid())
+	{
+		// we might need to remove this node and its siblings if all are free now
+		TArray<TPair<LayerIndexType, MortonCodeType>> childCodes;
+
+		NodeIndexType index;
+		if (GetNodeIndexFromMortonCode(link.LayerIndex + 1, node->GetMortonCode() >> 3, index))
+		{
+			auto parentLink = TDPNodeLink(link.LayerIndex + 1, index, 0);
+			auto parentNode = GetNodeFromLink(parentLink);
+			GetNodePosition(parentLink.LayerIndex, parentNode->GetMortonCode(), nodePosition);
+
+			while (!IsVoxelBlocked(nodePosition, mLayerVoxelHalfSizeCache[parentLink.LayerIndex], true))
+			{
+				auto childLink = parentNode->GetFirstChild();
+
+				if (!childLink.IsValid())
+				{
+					break;
+				}
+
+				auto childNode = GetNodeFromLink(childLink);
+				childCodes.Emplace(static_cast<LayerIndexType>(childLink.LayerIndex), childNode->GetMortonCode());
+				parentNode->GetFirstChild().Invalidate();
+
+				bool result = GetNodeIndexFromMortonCode(parentLink.LayerIndex + 1, parentNode->GetMortonCode() >> 3, index);
+
+				if (!result)
+				{
+					break;
+				}
+
+				parentLink = TDPNodeLink(parentLink.LayerIndex + 1, index, 0);
+
+				if (!parentLink.IsValid())
+				{
+					break;
+				}
+
+				parentNode = GetNodeFromLink(parentLink);
+				GetNodePosition(parentLink.LayerIndex, parentNode->GetMortonCode(), nodePosition);
+			}
+
+			for (auto& pair : childCodes)
+			{
+				NodeIndexType index;
+				bool result = GetNodeIndexFromMortonCode(pair.Key, pair.Value, index);
+				check(result);
+
+				mOctree.Layers[pair.Key].RemoveAt(index, 8);
+				if (pair.Key == 0)
+				{
+					mOctree.LeafNodes.RemoveAt(index, 8);
+				}
+			}
+		}
+		else
+		{
+			int32 first = link.NodeIndex - (link.NodeIndex % 8);
+
+			mOctree.Layers[link.LayerIndex].RemoveAt(first, 8);
+			if (link.LayerIndex == 0)
+			{
+				mOctree.LeafNodes.RemoveAt(first, 8);
+			}
+		}
+	}
+}
+
+void ATDPVolume::UpdateLeafNode(const FVector& origin, NodeIndexType leaf)
+{
+	TDPLeafNode newLeaf;
+	const int32 totalLeaves = 64;
+	const float leafSize = mLayerVoxelHalfSizeCache[0] / 2; // 64 leaves per leaf node (cached value is already half)
+
+	for (int32 i = 0; i < totalLeaves; ++i)
+	{
+		uint_fast32_t x, y, z;
+		libmorton::morton3D_64_decode(i, x, y, z);
+		FVector position = origin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
+
+		if (IsVoxelBlocked(position, leafSize / 2, true))
+		{
+			newLeaf.SetSubnode(i);
+
+			/*if (DrawMiniLeafVoxels)
+			{
+				DrawNodeVoxel(position, FVector(leafSize / 2), FColor::Black);
+			}*/
+		}
+	}
+
+	mOctree.LeafNodes[leaf] = newLeaf;
+}
+
 bool ATDPVolume::IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const
 {
 	return layer == mBlockedIndices.Num() || mBlockedIndices[layer].Contains(code >> 3);
@@ -512,6 +842,28 @@ bool ATDPVolume::IsVoxelBlocked(const FVector& position, const float halfSize, b
 	FCollisionQueryParams collisionParams;
 	collisionParams.bFindInitialOverlaps = true;
 	collisionParams.bTraceComplex = mComplexCollision;
+
+	float clearance = useClearance ? mCollisionClearance : 0.0f;
+	bool result = GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + clearance)), collisionParams);
+
+#if WITH_EDITOR
+	if (DrawCollisionVoxels && result)
+	{
+		DrawDebugBox(GetWorld(), position, FVector(halfSize + clearance), FQuat::Identity, FColor::Black, true);
+	}
+#endif
+
+	return result;
+}
+
+bool ATDPVolume::IsVoxelBlocked(const FVector& position, const float halfSize, const TSet<AActor*>& filter, bool useClearance) const
+{
+	FCollisionQueryParams collisionParams;
+	collisionParams.bFindInitialOverlaps = true;
+	collisionParams.bTraceComplex = mComplexCollision;
+
+	auto ignored = mActors.Difference(filter);
+	collisionParams.AddIgnoredActors(ignored.Array());
 
 	float clearance = useClearance ? mCollisionClearance : 0.0f;
 	bool result = GetWorld()->OverlapBlockingTestByChannel(position, FQuat::Identity, mCollisionChannel, FCollisionShape::MakeBox(FVector(halfSize + clearance)), collisionParams);
@@ -537,6 +889,32 @@ void ATDPVolume::GetNodePosition(LayerIndexType layer, MortonCodeType code, FVec
 	uint_fast32_t x, y, z;
 	libmorton::morton3D_64_decode(code, x, y, z);
 	position = mOrigin - mExtents + (size * FVector(x, y, z)) + FVector(size / 2);
+}
+
+NodeIndexType ATDPVolume::FindInsertIndex(LayerIndexType layer, MortonCodeType code) const
+{
+	const auto& octreeLayer = mOctree.GetLayer(layer);
+
+	int32 first = 0;
+	int32 last = octreeLayer.Num() - 1;
+	int32 middle = (first + last) / 2;
+
+	// nodes are built in acsending order by morton code so we can do binary search here
+	while (first <= last)
+	{
+		if (octreeLayer[middle].GetMortonCode() < code)
+		{
+			first = middle + 1;
+		}
+		else
+		{
+			last = middle - 1;
+		}
+
+		middle = (first + last) / 2;
+	}
+
+	return first;
 }
 
 int32 ATDPVolume::GetNodeAmountInLayer(LayerIndexType layer) const
@@ -708,6 +1086,16 @@ void ATDPVolume::GetVoxelMortonPosition(const FVector& position, const LayerInde
 int32 ATDPVolume::GetTotalLayers() const
 {
 	return mTotalLayers;
+}
+
+TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link)
+{
+	if (link.IsValid())
+	{
+		return &mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
+	}
+
+	return nullptr;
 }
 
 const TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link) const
@@ -928,6 +1316,72 @@ void ATDPVolume::DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color,
 	DrawDebugString(GetWorld(), position, label, nullptr, color);
 }
 
+void ATDPVolume::RequestOctreeUpdate(UTDPDynamicObstacleComponent& obstacle)
+{
+	if (mDynamicUpdateEnabled)
+	{
+		mOctreeDirty = true;
+		mPendingDynamicObstacles.AddUnique(&obstacle);
+	}
+}
+
+TArray<TDPNodeLink> ATDPVolume::GetAffectedNodes(AActor* actor) const
+{
+	if (IsValid(actor))
+	{
+		FBox box = actor->GetComponentsBoundingBox(false).ExpandBy(mCollisionClearance);
+		TSet<AActor*> filter;
+		filter.Emplace(actor);
+		return GetAffectedNodes(box, filter);
+	}
+
+	return {};
+}
+
+TArray<TDPNodeLink> ATDPVolume::GetAffectedNodes(const FBox& box, const TSet<AActor*>& filter) const
+{
+#if WITH_EDITOR
+	//DrawNodeVoxel(box.GetCenter(), box.GetExtent(), FColor::Emerald);
+#endif
+
+	TArray<TDPNodeLink> stack;
+	stack.Emplace(mLayers, 0, 0);
+
+	TArray<TDPNodeLink> result;
+
+	while (stack.Num() > 0)
+	{
+		auto link = stack.Pop();
+		const auto node = GetNodeFromLink(link);
+
+		FVector position;
+		GetNodePosition(link.LayerIndex, node->GetMortonCode(), position);
+
+		FBox voxel = FBox::BuildAABB(position, FVector(mLayerVoxelHalfSizeCache[link.LayerIndex]));
+		if (voxel.Intersect(box) && IsVoxelBlocked(position, mLayerVoxelHalfSizeCache[link.LayerIndex], filter, true))
+		{
+			if (node->HasChildren() && link.LayerIndex > 0)
+			{
+				for (uint32 i = 0; i < 8; ++i)
+				{
+					auto childLink = node->GetFirstChild();
+					childLink.NodeIndex += i;
+					stack.Emplace(childLink);
+				}
+			}
+			else
+			{
+#if WITH_EDITOR
+				//DrawNodeVoxel(position, FVector(mLayerVoxelHalfSizeCache[link.LayerIndex]), DebugHelper::LayerColors[link.LayerIndex]);
+#endif
+				result.Emplace(link);
+			}
+		}
+	}
+
+	return result;
+}
+
 void ATDPVolume::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
@@ -942,20 +1396,32 @@ void ATDPVolume::Serialize(FArchive& Ar)
 	}
 }
 
-bool ATDPVolume::GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const
+bool ATDPVolume::GetNodeIndexFromMortonCode(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const
 {
 	const auto& octreeLayer = mOctree.GetLayer(layer);
 
-	if (nodeCode < octreeLayer[octreeLayer.Num() - 1].GetMortonCode())
+	int32 first = 0;
+	int32 last = octreeLayer.Num() - 1;
+	int32 middle = (first + last) / 2;
+
+	// nodes are built in acsending order by morton code so we can do binary search here
+	while (first <= last)
 	{
-		for (int32 i = 0; i < octreeLayer.Num(); ++i)
+		if (octreeLayer[middle].GetMortonCode() < nodeCode)
 		{
-			if (octreeLayer[i].GetMortonCode() == nodeCode)
-			{
-				index = i;
-				return true;
-			}
+			first = middle + 1;
 		}
+		else if (octreeLayer[middle].GetMortonCode() == nodeCode)
+		{
+			index = middle;
+			return true;
+		}
+		else
+		{
+			last = middle - 1;
+		}
+
+		middle = (first + last) / 2;
 	}
 
 	return false;
@@ -967,6 +1433,11 @@ void ATDPVolume::DrawNodeVoxel(const LayerIndexType layer, const TDPNode& node) 
 	GetNodePosition(layer, node.GetMortonCode(), position);
 
 	DrawNodeVoxel(position, FVector(mLayerVoxelHalfSizeCache[layer]), DebugHelper::LayerColors[layer]);
+
+	if (DrawOctreeMortonCodes)
+	{
+		DrawDebugString(GetWorld(), position, FString::FromInt(layer) + ":" + FString::FromInt(node.GetMortonCode()), nullptr, DebugHelper::LayerColors[layer]);
+	}
 }
 
 void ATDPVolume::DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const

@@ -52,5 +52,5 @@ bool TDPNodeLink::IsValid() const
 
 FString TDPNodeLink::ToString() const
 {
-	return FString::Printf(TEXT("%i, %i, %i"), LayerIndex, NodeIndex, SubnodeIndex);
+	return FString::Printf(TEXT("NodeLink [Layer: %i, Index: %i, Subindex: %i]"), LayerIndex, NodeIndex, SubnodeIndex);
 }

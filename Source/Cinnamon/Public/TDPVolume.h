@@ -8,6 +8,8 @@
 #include "TDPTree.h"
 #include "TDPVolume.generated.h"
 
+class UTDPDynamicObstacleComponent;
+
 /**
  * 
  */
@@ -24,6 +26,8 @@ public:
 	virtual void PostRegisterAllComponents() override;
 	virtual void PostUnregisterAllComponents() override;
 	//~ End AActor Interface
+
+	virtual void Tick(float DeltaTime) override;
 
 #if WITH_EDITOR
 	//~ Begin UObject Interface
@@ -56,9 +60,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding Debug")
 	void FlushDrawnOctree() const;
 
+	UFUNCTION(BlueprintCallable, Category = "3D Pathfinding")
+	FVector GetRandomPointInVolume() const;
+
 public:
 	// Debug Info
-
 #if WITH_EDITOR
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	bool DrawVoxels = false;
@@ -104,11 +110,16 @@ public:
 	bool GetLinkFromPosition(const FVector& position, TDPNodeLink& link) const;
 	void GetVoxelMortonPosition(const FVector& position, const LayerIndexType layer, FIntVector& mortonPosition) const;
 	int32 GetTotalLayers() const;
+	TDPNode* GetNodeFromLink(const TDPNodeLink& link);
 	const TDPNode* GetNodeFromLink(const TDPNodeLink& link) const;
 	void GetNodeNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
 	void GetLeafNeighborsFromLink(const TDPNodeLink& link, TArray<TDPNodeLink>& neighbors) const;
 	bool IsPointInside(const FVector& point) const;
 	void DrawVoxelFromLink(const TDPNodeLink& link, const FColor& color = FColor::Black, const FString& label = FString()) const;
+
+	void RequestOctreeUpdate(UTDPDynamicObstacleComponent& obstacle);
+	TArray<TDPNodeLink> GetAffectedNodes(AActor* actor) const;
+	TArray<TDPNodeLink> GetAffectedNodes(const FBox& box, const TSet<AActor*>& filter = TSet<AActor*>()) const;
 
 	virtual void Serialize(FArchive& Ar) override;
 
@@ -146,8 +157,21 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Extents"))
 	FVector mExtents;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Dynamic Update Enabled"))
+	bool mDynamicUpdateEnabled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding", meta = (AllowPrivateAccess = true, DisplayName = "Optimized Dynamic Update"))
+	bool mOptimizedDynamicUpdate = false;
+
 	TDPTree mOctree;
 	TArray<TSet<MortonCodeType>> mBlockedIndices;
+
+	bool mOctreeDirty = false;
+
+	TSet<AActor*> mActors;
+	TArray<UTDPDynamicObstacleComponent*> mPendingDynamicObstacles;
+
+	TSet<TDPNodeLink> mInvalidNodes;
 
 private:
 	void RasterizeLowRes();
@@ -155,13 +179,18 @@ private:
 	void RasterizeLeafNode(const FVector& origin, NodeIndexType leaf);
 	void SetNeighborLinks(const LayerIndexType layer);
 	bool FindNeighborLink(const LayerIndexType layerIndex, const NodeIndexType nodeIndex, uint8 direction, TDPNodeLink& link, const FVector& nodePosition);
+	void UpdateOctree();
+	void UpdateNode(const TDPNodeLink link);
+	void UpdateLeafNode(const FVector& origin, NodeIndexType leaf);
 
 	bool IsNodeBlocked(LayerIndexType layer, MortonCodeType code) const;
 	bool IsVoxelBlocked(const FVector& position, const float halfSize, bool useClearance = false) const;
+	bool IsVoxelBlocked(const FVector& position, const float halfSize, const TSet<AActor*>& filter, bool useClearance = false) const;
 
 	int32 GetNodeAmountInLayer(LayerIndexType layer) const;
-	bool GetNodeIndexInLayer(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const;
+	bool GetNodeIndexFromMortonCode(const LayerIndexType layer, const MortonCodeType nodeCode, NodeIndexType& index) const;
 	void GetNodePosition(LayerIndexType layer, MortonCodeType code, FVector& position) const;
+	NodeIndexType FindInsertIndex(LayerIndexType layer, MortonCodeType code) const;
 
 	void DrawNodeVoxel(const LayerIndexType layer, const TDPNode& node) const;
 	void DrawNodeVoxel(const FVector& position, const FVector& extent, const FColor& color) const;
