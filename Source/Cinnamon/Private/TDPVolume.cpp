@@ -58,7 +58,10 @@ void ATDPVolume::Tick(float DeltaTime)
 	if (mDynamicUpdateEnabled && mOctreeDirty)
 	{
 #if WITH_EDITOR
-		UE_LOG(CinnamonLog, Log, TEXT("Updating Octree..."));
+		if (PrintLogMessagesOnTick)
+		{
+			UE_LOG(CinnamonLog, Log, TEXT("Updating Octree..."));
+		}
 
 		auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -70,7 +73,10 @@ void ATDPVolume::Tick(float DeltaTime)
 
 #if WITH_EDITOR
 		float totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count() / 1000.0f;
-		UE_LOG(CinnamonLog, Log, TEXT("Dynamic Update Time (s): %f"), totalTime);
+		if (PrintLogMessagesOnTick)
+		{
+			UE_LOG(CinnamonLog, Log, TEXT("Dynamic Update Time (s): %f"), totalTime);
+		}
 
 		if (DrawVoxels)
 		{
@@ -597,6 +603,7 @@ void ATDPVolume::UpdateOctree()
 				if (!GetNodeIndexFromMortonCode(i + 1, node.GetMortonCode() >> 3, index))
 				{
 					codes.Emplace(static_cast<LayerIndexType>(i), node.GetMortonCode());
+					j += 7;
 				}
 			}
 		}
@@ -608,7 +615,7 @@ void ATDPVolume::UpdateOctree()
 			if (GetNodeIndexFromMortonCode(pair.Key, pair.Value, index))
 			{
 				int32 first = index - (index % 8);
-				mOctree.Layers[pair.Key].RemoveAt(first, 8);
+				mOctree.Layers[pair.Key].RemoveAt(first, 8);				
 
 				if (pair.Key == 0)
 				{
@@ -616,6 +623,43 @@ void ATDPVolume::UpdateOctree()
 				}
 			}
 		}
+
+		/*while (codes.Num() > 0)
+		{
+			auto pair = codes.Pop();
+			NodeIndexType index;
+			if (GetNodeIndexFromMortonCode(pair.Key, pair.Value, index))
+			{
+				int32 first = index - (index % 8);
+				mOctree.Layers[pair.Key].RemoveAt(first, 8);
+
+				if (pair.Key == 0)
+				{
+					mOctree.LeafNodes.RemoveAt(first, 8);
+				}
+				else
+				{
+					codes.AddDefaulted(8);
+					int32 child = 0;
+					for (int32 i = codes.Num() - 8; i < codes.Num(); ++i)
+					{
+						codes[i].Key = pair.Key - 1;
+						codes[i].Value = (pair.Value + child) << 3;
+						++child;
+					}
+
+					if (pair.Key < mLayers - 2)
+					{
+						FVector position;
+						GetNodePosition(pair.Key + 2, (pair.Value >> 3) >> 3, position);
+						if (!IsVoxelBlocked(position, mLayerVoxelHalfSizeCache[pair.Key + 2], true))
+						{
+							codes.Emplace(pair.Key + 1, pair.Value >> 3);
+						}
+					}
+				}
+			}
+		}*/
 
 		// fix parent-child links
 		for (int32 i = mLayers - 2; i >= 0; --i)
@@ -759,6 +803,12 @@ void ATDPVolume::UpdateNode(const TDPNodeLink link)
 				}
 
 				auto childNode = GetNodeFromLink(childLink);
+
+				if (childNode == nullptr)
+				{
+					break;
+				}
+
 				childCodes.Emplace(static_cast<LayerIndexType>(childLink.LayerIndex), childNode->GetMortonCode());
 				parentNode->GetFirstChild().Invalidate();
 
@@ -978,90 +1028,175 @@ bool ATDPVolume::GetLinkFromPosition(const FVector& position, TDPNodeLink& link)
 
 		MortonCodeType code = libmorton::morton3D_64_encode(static_cast<uint_fast32_t>(voxel.X), static_cast<uint_fast32_t>(voxel.Y), static_cast<uint_fast32_t>(voxel.Z));
 
-		for (NodeIndexType i = currentNode; i < layer.Num(); ++i)
+		NodeIndexType index;
+		if (GetNodeIndexFromMortonCode(currentLayer, code, index))
 		{
-			const auto& node = layer[i];
-			if (node.GetMortonCode() == code)
+			const auto& node = layer[index];
+			// if node found and it has no children then this is our most precise node for the given position
+			if (!node.GetFirstChild().IsValid())
 			{
-				// if node found and it has no children then this is our most precise node for the given position
-				if (!node.GetFirstChild().IsValid())
-				{
-					link.SetLayerIndex(currentLayer);
-					link.SetNodeIndex(i);
-					link.SetSubnodeIndex(0);
+				link.SetLayerIndex(currentLayer);
+				link.SetNodeIndex(index);
+				link.SetSubnodeIndex(0);
 
-					return true;
-				}
-
-				// if we are in layer 0 then we have to find the subnode inside the leaf node that contains the given position
-				if (currentLayer == 0)
-				{
-					const auto& leaf = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
-					float voxelHalfSize = mLayerVoxelHalfSizeCache[currentLayer];
-					float leafSize = voxelHalfSize / 2;
-
-					FVector nodePosition;
-					GetNodePosition(currentLayer, node.GetMortonCode(), nodePosition);
-					FVector nodeOrigin = nodePosition - FVector(voxelHalfSize);
-					FVector nodeLocalPosition = position - nodeOrigin;
-
-					int32 leafIndex;
-					FVector leafPosition;
-					bool found = false;
-					for (leafIndex = 0; leafIndex < 64; ++leafIndex)
-					{
-						uint_fast32_t x, y, z;
-						libmorton::morton3D_64_decode(leafIndex, x, y, z);
-						leafPosition = nodeOrigin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
-						if ((position.X >= leafPosition.X - (leafSize / 2)) && (position.X <= leafPosition.X + (leafSize / 2)) &&
-							(position.Y >= leafPosition.Y - (leafSize / 2)) && (position.Y <= leafPosition.Y + (leafSize / 2)) &&
-							(position.Z >= leafPosition.Z - (leafSize / 2)) && (position.Z <= leafPosition.Z + (leafSize / 2)))
-						{
-							found = true;
-							break;
-						}
-					}
-
-					if (!found)
-					{
-#if WITH_EDITOR
-						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: could not find node."));
-#endif
-						return false;
-					}
-
-					/*FIntVector mortonPosition;
-					mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / (voxelHalfSize / 2));
-					mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / (voxelHalfSize / 2));
-					mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / (voxelHalfSize / 2));*/
-
-					link.SetLayerIndex(currentLayer);
-					link.SetNodeIndex(i);
-
-					//MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
-
-					if (leaf.GetSubnode(leafIndex))
-					{
-#if WITH_EDITOR
-						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: node at position %s is blocked."), *position.ToString());
-						DrawNodeVoxel(leafPosition, FVector(mLayerVoxelHalfSizeCache[0] / 4), FColor::Emerald);
-						DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[0]), DebugHelper::LayerColors[0]);
-#endif
-						return false;
-					}
-
-					link.SetSubnodeIndex(static_cast<SubnodeIndexType>(leafIndex));
-
-					return true;
-				}
-
-				// if no leaf node then we keep going down the octree to the next layer and 
-				currentLayer = node.GetFirstChild().LayerIndex;
-				currentNode = node.GetFirstChild().NodeIndex;
-
-				break;
+				return true;
 			}
+
+			// if we are in layer 0 then we have to find the subnode inside the leaf node that contains the given position
+			if (currentLayer == 0)
+			{
+				const auto& leaf = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
+				float voxelHalfSize = mLayerVoxelHalfSizeCache[currentLayer];
+				float leafSize = voxelHalfSize / 2;
+
+				FVector nodePosition;
+				GetNodePosition(currentLayer, node.GetMortonCode(), nodePosition);
+				FVector nodeOrigin = nodePosition - FVector(voxelHalfSize);
+				FVector nodeLocalPosition = position - nodeOrigin;
+
+				int32 leafIndex;
+				FVector leafPosition;
+				bool found = false;
+				for (leafIndex = 0; leafIndex < 64; ++leafIndex)
+				{
+					uint_fast32_t x, y, z;
+					libmorton::morton3D_64_decode(leafIndex, x, y, z);
+					leafPosition = nodeOrigin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
+					if ((position.X >= leafPosition.X - (leafSize / 2)) && (position.X <= leafPosition.X + (leafSize / 2)) &&
+						(position.Y >= leafPosition.Y - (leafSize / 2)) && (position.Y <= leafPosition.Y + (leafSize / 2)) &&
+						(position.Z >= leafPosition.Z - (leafSize / 2)) && (position.Z <= leafPosition.Z + (leafSize / 2)))
+					{
+						found = true;
+						break;
+					}
+				}
+
+				if (!found)
+				{
+#if WITH_EDITOR
+					UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: could not find node."));
+#endif
+					return false;
+				}
+
+				/*FIntVector mortonPosition;
+				mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / (voxelHalfSize / 2));
+				mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / (voxelHalfSize / 2));
+				mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / (voxelHalfSize / 2));*/
+
+				link.SetLayerIndex(currentLayer);
+				link.SetNodeIndex(index);
+
+				//MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+
+				if (leaf.GetSubnode(leafIndex))
+				{
+#if WITH_EDITOR
+					UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: node at position %s is blocked."), *position.ToString());
+					DrawNodeVoxel(leafPosition, FVector(mLayerVoxelHalfSizeCache[0] / 4), FColor::Emerald);
+					DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[0]), DebugHelper::LayerColors[0]);
+#endif
+					return false;
+				}
+
+				link.SetSubnodeIndex(static_cast<SubnodeIndexType>(leafIndex));
+
+				return true;
+			}
+
+			// if no leaf node then we keep going down the octree to the next layer and 
+			currentLayer = node.GetFirstChild().LayerIndex;
+			//currentNode = node.GetFirstChild().NodeIndex;
+		} 
+		else if (currentLayer == 0)
+		{
+			break;
 		}
+
+//		for (NodeIndexType i = currentNode; i < layer.Num(); ++i)
+//		{
+//			const auto& node = layer[i];
+//			if (node.GetMortonCode() == code)
+//			{
+//				// if node found and it has no children then this is our most precise node for the given position
+//				if (!node.GetFirstChild().IsValid())
+//				{
+//					link.SetLayerIndex(currentLayer);
+//					link.SetNodeIndex(i);
+//					link.SetSubnodeIndex(0);
+//
+//					return true;
+//				}
+//
+//				// if we are in layer 0 then we have to find the subnode inside the leaf node that contains the given position
+//				if (currentLayer == 0)
+//				{
+//					const auto& leaf = mOctree.LeafNodes[node.GetFirstChild().NodeIndex];
+//					float voxelHalfSize = mLayerVoxelHalfSizeCache[currentLayer];
+//					float leafSize = voxelHalfSize / 2;
+//
+//					FVector nodePosition;
+//					GetNodePosition(currentLayer, node.GetMortonCode(), nodePosition);
+//					FVector nodeOrigin = nodePosition - FVector(voxelHalfSize);
+//					FVector nodeLocalPosition = position - nodeOrigin;
+//
+//					int32 leafIndex;
+//					FVector leafPosition;
+//					bool found = false;
+//					for (leafIndex = 0; leafIndex < 64; ++leafIndex)
+//					{
+//						uint_fast32_t x, y, z;
+//						libmorton::morton3D_64_decode(leafIndex, x, y, z);
+//						leafPosition = nodeOrigin + FVector(x * leafSize, y * leafSize, z * leafSize) + FVector(leafSize / 2);
+//						if ((position.X >= leafPosition.X - (leafSize / 2)) && (position.X <= leafPosition.X + (leafSize / 2)) &&
+//							(position.Y >= leafPosition.Y - (leafSize / 2)) && (position.Y <= leafPosition.Y + (leafSize / 2)) &&
+//							(position.Z >= leafPosition.Z - (leafSize / 2)) && (position.Z <= leafPosition.Z + (leafSize / 2)))
+//						{
+//							found = true;
+//							break;
+//						}
+//					}
+//
+//					if (!found)
+//					{
+//#if WITH_EDITOR
+//						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: could not find node."));
+//#endif
+//						return false;
+//					}
+//
+//					/*FIntVector mortonPosition;
+//					mortonPosition.X = FMath::FloorToInt(nodeLocalPosition.X / (voxelHalfSize / 2));
+//					mortonPosition.Y = FMath::FloorToInt(nodeLocalPosition.Y / (voxelHalfSize / 2));
+//					mortonPosition.Z = FMath::FloorToInt(nodeLocalPosition.Z / (voxelHalfSize / 2));*/
+//
+//					link.SetLayerIndex(currentLayer);
+//					link.SetNodeIndex(i);
+//
+//					//MortonCodeType leafIndex = libmorton::morton3D_64_encode(mortonPosition.X, mortonPosition.Y, mortonPosition.Z);
+//
+//					if (leaf.GetSubnode(leafIndex))
+//					{
+//#if WITH_EDITOR
+//						UE_LOG(CinnamonLog, Warning, TEXT("GetLinkFromPosition: node at position %s is blocked."), *position.ToString());
+//						DrawNodeVoxel(leafPosition, FVector(mLayerVoxelHalfSizeCache[0] / 4), FColor::Emerald);
+//						DrawNodeVoxel(nodePosition, FVector(mLayerVoxelHalfSizeCache[0]), DebugHelper::LayerColors[0]);
+//#endif
+//						return false;
+//					}
+//
+//					link.SetSubnodeIndex(static_cast<SubnodeIndexType>(leafIndex));
+//
+//					return true;
+//				}
+//
+//				// if no leaf node then we keep going down the octree to the next layer and 
+//				currentLayer = node.GetFirstChild().LayerIndex;
+//				currentNode = node.GetFirstChild().NodeIndex;
+//
+//				break;
+//			}
+//		}
 	}
 
 #if WITH_EDITOR
@@ -1090,7 +1225,7 @@ int32 ATDPVolume::GetTotalLayers() const
 
 TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link)
 {
-	if (link.IsValid())
+	if (link.IsValid() && static_cast<int32>(link.NodeIndex) < mOctree.GetLayer(link.LayerIndex).Num())
 	{
 		return &mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
 	}
@@ -1100,7 +1235,7 @@ TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link)
 
 const TDPNode* ATDPVolume::GetNodeFromLink(const TDPNodeLink& link) const
 {
-	if (link.IsValid())
+	if (link.IsValid() && static_cast<int32>(link.NodeIndex) < mOctree.GetLayer(link.LayerIndex).Num())
 	{
 		return &mOctree.GetLayer(link.LayerIndex)[link.NodeIndex];
 	}
@@ -1353,6 +1488,11 @@ TArray<TDPNodeLink> ATDPVolume::GetAffectedNodes(const FBox& box, const TSet<AAc
 	{
 		auto link = stack.Pop();
 		const auto node = GetNodeFromLink(link);
+
+		if (node == nullptr)
+		{
+			continue;
+		}
 
 		FVector position;
 		GetNodePosition(link.LayerIndex, node->GetMortonCode(), position);

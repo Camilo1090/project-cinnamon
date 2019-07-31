@@ -101,6 +101,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
 	bool DrawCollisionVoxels = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "3D Pathfinding Debug")
+	bool PrintLogMessagesOnTick = true;
 #endif
 
 public:
